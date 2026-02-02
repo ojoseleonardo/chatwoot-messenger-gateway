@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import tempfile
-from typing import Optional
+from typing import Optional, Union
 
 from pyee.asyncio import AsyncIOEventEmitter
 from telethon import TelegramClient, errors, events, functions, types
@@ -251,45 +251,81 @@ class TelegramAdapter(MessengerAdapter):
         # Anything else is not supported
         raise ValueError("recipient_id must be @username, phone number, or id:<int>")
 
-    async def set_typing(self, recipient_id: str, typing: bool = True) -> None:
+    def _entity_for_dispatch(
+        self, recipient_id: str, access_hash: Optional[int] = None
+    ) -> Optional[types.InputPeerUser]:
+        """
+        Se tiver access_hash e recipient_id numérico, devolve InputPeerUser.
+        Caso contrário devolve None (usa _resolve_entity).
+        """
+        if access_hash is None:
+            return None
+        rid = (recipient_id or "").strip()
+        if rid.startswith("id:"):
+            rid = rid[3:].strip()
+        if not rid.isdigit():
+            return None
+        return types.InputPeerUser(int(rid), access_hash)
+
+    async def set_typing(
+        self, recipient_id: str, typing: bool = True, access_hash: Optional[int] = None
+    ) -> None:
         """
         Mostra ou cancela o indicador de digitação (typing) para o destinatário.
-        Usado pelo endpoint de disparo manual antes de enviar a mensagem.
+        access_hash: opcional; permite usar user_id sem o user ter iniciado conversa.
         """
         if not self.client or not self.client.is_connected():
             return
         try:
-            entity = await self._resolve_entity(recipient_id)
+            entity: Union[types.InputPeerUser, object] = self._entity_for_dispatch(
+                recipient_id, access_hash
+            )
+            if entity is None:
+                entity = await self._resolve_entity(recipient_id)
             action = "typing" if typing else "cancel"
             await self.client.action(entity, action)
         except Exception as e:
             logger.debug("[telegram] set_typing failed: %s", e)
 
-    async def send_text(self, recipient_id: str, content: TextContent) -> None:
+    async def send_text(
+        self,
+        recipient_id: str,
+        content: TextContent,
+        access_hash: Optional[int] = None,
+    ) -> None:
         """
         Send a simple text message, resolving the recipient first.
-        Handles common Telegram flood/anti-spam errors.
+        access_hash: opcional; permite enviar por user_id sem o user ter iniciado conversa.
+        Raises on failure so callers (e.g. /dispatch) can return error to the client.
         """
         if not self.client or not self.client.is_connected():
-            logger.warning("[telegram] client is not connected; skipping send")
-            return
+            raise RuntimeError("Cliente Telegram não está conectado")
+
+        entity = self._entity_for_dispatch(recipient_id, access_hash)
+        if entity is None:
+            entity = await self._resolve_entity(recipient_id)
 
         try:
-            entity = await self._resolve_entity(recipient_id)
             await self.client.send_message(entity, content.text)
             logger.info("[telegram] SENT: %s -> %s", recipient_id, content.text)
-
+        except ValueError as e:
+            if "Cannot find any entity" in str(e) or "corresponding to" in str(e):
+                raise RuntimeError(
+                    f"Destinatário '{recipient_id}' não encontrado. "
+                    "O utilizador precisa ter iniciado conversa com esta conta (Telegram) antes."
+                ) from e
+            raise
         except errors.rpcerrorlist.FloodWaitError as e:
-            # Telegram asks to wait N seconds before retry
             logger.error("[telegram] FloodWait: wait %s seconds", e.seconds)
-            # Optionally: schedule a delayed retry here
-
+            raise RuntimeError(f"Telegram FloodWait: aguardar {e.seconds}s antes de reenviar") from e
         except errors.rpcerrorlist.PeerFloodError:
-            # Too many first messages to unknown users in a short time window
             logger.error("[telegram] PeerFloodError: too many first messages")
-
+            raise RuntimeError(
+                "Telegram PeerFlood: demasiadas primeiras mensagens; aguardar antes de reenviar"
+            ) from None
         except Exception as e:
             logger.exception("[telegram] Failed to send text: %s", e)
+            raise
 
     async def send_media(
         self, recipient_id: str, content: MediaContent

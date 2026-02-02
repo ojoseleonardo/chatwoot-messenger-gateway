@@ -2,7 +2,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pyee.asyncio import AsyncIOEventEmitter
 from starlette.responses import PlainTextResponse
 
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class DispatchBody(BaseModel):
     """Corpo do endpoint de disparo manual (apenas Telegram): destinatário, texto e tempo de typing."""
 
-    recipient_id: str = Field(..., min_length=1, description="ID do destinatário (ex: @user, id:123)")
+    recipient_id: str = Field(..., min_length=1, description="ID do destinatário (ex: @user, 6149474306)")
     text: str = Field(..., min_length=1, description="Texto da mensagem")
     typing_seconds: float = Field(
         default=2.0,
@@ -24,6 +24,29 @@ class DispatchBody(BaseModel):
         le=60,
         description="Segundos que o indicador de digitação fica ativo antes de enviar (0 = sem typing)",
     )
+    access_hash: Optional[int] = Field(
+        default=None,
+        description="Access hash do destinatário (Telegram). Obrigatório para enviar para pessoas novas (que não iniciaram conversa); sem ele o envio por user_id falha.",
+    )
+
+    @field_validator("recipient_id", mode="before")
+    @classmethod
+    def recipient_id_to_str(cls, v: object) -> str:
+        """Aceita número (ex.: n8n envia 6149474306) e converte para string."""
+        if v is None:
+            return ""
+        return str(v).strip()
+
+    @field_validator("access_hash", mode="before")
+    @classmethod
+    def access_hash_to_int(cls, v: object) -> Optional[int]:
+        """Aceita número ou string numérica (ex.: do n8n) e converte para int."""
+        if v is None:
+            return None
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
 
 
 def create_router(
@@ -234,9 +257,15 @@ def create_router(
                     recipient_id=body.recipient_id.strip(),
                     text=body.text.strip(),
                     typing_seconds=body.typing_seconds,
+                    access_hash=body.access_hash,
                 )
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
+            except (RuntimeError, Exception) as e:
+                raise HTTPException(
+                    status_code=503,
+                    detail=str(e),
+                ) from e
             return {"status": "ok", "recipient_id": body.recipient_id}
 
     return router

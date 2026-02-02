@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.domain.message import MediaContent, TextContent
 from app.domain.ports import MessengerAdapter
@@ -232,10 +232,12 @@ class MessageRouter:
         recipient_id: str,
         text: str,
         typing_seconds: float = 2.0,
+        access_hash: Optional[int] = None,
     ) -> None:
         """
         Envia texto para um destinatário no Telegram.
         Mostra indicador de digitação (typing) pelo tempo informado antes de enviar.
+        access_hash: opcional; permite enviar por user_id sem o user ter iniciado conversa.
         """
         if channel != "telegram":
             raise ValueError("O endpoint /dispatch é apenas para Telegram")
@@ -247,12 +249,24 @@ class MessageRouter:
             set_typing = getattr(adapter, "set_typing", None)
             if callable(set_typing):
                 try:
-                    await set_typing(recipient_id, typing=True)
+                    await set_typing(
+                        recipient_id, typing=True, access_hash=access_hash
+                    )
                     await asyncio.sleep(typing_seconds)
                 except Exception as e:
                     logger.warning("[router] set_typing falhou (ignorado): %s", e)
 
-        await adapter.send_text(recipient_id, TextContent(type="text", text=text))
+        try:
+            await adapter.send_text(
+                recipient_id,
+                TextContent(type="text", text=text),
+                access_hash=access_hash,
+            )
+        except (ValueError, RuntimeError):
+            raise
+        except Exception as e:
+            logger.exception("[router] DISPATCH send_text failed: %s", e)
+            raise RuntimeError(f"Falha ao enviar: {e}") from e
         logger.info(
             "[router] DISPATCH: recipient_id=%s text=%r",
             recipient_id,
@@ -262,13 +276,17 @@ class MessageRouter:
     async def dispatch_outbound(
         self, channel: str, recipient_id: str, text: str
     ) -> None:
-        """Send text via selected channel adapter."""
+        """Send text via selected channel adapter (Chatwoot flow; errors are logged, not raised)."""
         adapter = self.adapters.get(channel)
         if not adapter:
             logger.warning("[router] No adapter for channel=%s", channel)
             return
 
-        await adapter.send_text(recipient_id, TextContent(type="text", text=text))
+        try:
+            await adapter.send_text(recipient_id, TextContent(type="text", text=text))
+        except Exception as e:
+            logger.exception("[router] OUTBOUND send_text failed: %s", e)
+            return
         logger.info(
             "[router] OUTBOUND: channel=%s recipient_id=%s text=%r",
             channel,
