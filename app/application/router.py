@@ -25,8 +25,14 @@ def _dig(src: dict, *path, default=None):
 class MessageRouter:
     """Router: dispatch outgoing text messages to channel adapters."""
 
-    def __init__(self, adapters: Dict[str, MessengerAdapter] | None = None):
+    def __init__(
+        self,
+        adapters: Dict[str, MessengerAdapter] | None = None,
+        chatwoot_base_url: str | None = None,
+    ):
         self.adapters = adapters or {}
+        # Para resolver URLs relativas dos anexos (ex.: /rails/active_storage/...)
+        self._chatwoot_base = (chatwoot_base_url or "").rstrip("/")
 
     async def handle_incoming(self, msg):
         # Not implemented in this demo
@@ -114,6 +120,13 @@ class MessageRouter:
         # Other channels: do not guess
         return None
 
+    def _resolve_attachment_url(self, data_url: str) -> str:
+        """Converte URL relativa do Chatwoot em absoluta (necessário para download)."""
+        url = (data_url or "").strip()
+        if url.startswith("/") and self._chatwoot_base:
+            return f"{self._chatwoot_base}{url}"
+        return url
+
     def _first_audio_attachment(
         self, attachments: List[Dict[str, Any]]
     ) -> MediaContent | None:
@@ -127,10 +140,11 @@ class MessageRouter:
             if not data_url:
                 continue
             if file_type in AUDIO_FILE_TYPES or ext in AUDIO_EXTENSIONS:
+                url = self._resolve_attachment_url(data_url)
                 return MediaContent(
                     type="media",
                     media_type="audio",
-                    url=data_url,
+                    url=url,
                     caption=None,
                     filename=att.get("filename"),
                     mime_type=att.get("content_type"),
@@ -180,7 +194,7 @@ class MessageRouter:
         if not attachments:
             attachments = _dig(payload, "message", "attachments") or []
 
-        # Exige texto OU pelo menos um anexo (ex.: áudio)
+        # Texto não é obrigatório: pode enviar só áudio (ou outro anexo). Exige texto OU anexo.
         if not text and not attachments:
             logger.warning(
                 "[router] Missing content: channel=%r recipient_id=%r text=%r attachments=%s",
@@ -196,7 +210,7 @@ class MessageRouter:
                 channel=channel, recipient_id=recipient_id, text=text
             )
 
-        # Primeiro anexo de áudio: enviar como media (voice no Telegram)
+        # Primeiro anexo de áudio: enviar como media (voice no Telegram), com ou sem texto
         if attachments and channel == "telegram":
             first_audio = self._first_audio_attachment(attachments)
             if first_audio:

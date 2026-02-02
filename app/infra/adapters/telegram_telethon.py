@@ -161,7 +161,7 @@ class TelegramAdapter(MessengerAdapter):
                             "audio/ogg" if is_voice else "audio/mpeg"
                         )
                         if not payload["text"]:
-                            payload["text"] = "(áudio)"
+                            payload["text"] = ""
                         logger.info(
                             "[telegram] OUTGOING (disparo): to=%s áudio/voice -> Chatwoot",
                             rid,

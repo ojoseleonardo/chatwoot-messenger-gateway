@@ -39,7 +39,10 @@ if config.telegram:
 if config.vk:
     adapters["vk"] = VkAdapter(bus=bus, config=config.vk)
 
-router = MessageRouter(adapters=adapters)
+router = MessageRouter(
+    adapters=adapters,
+    chatwoot_base_url=str(config.chatwoot.base_url),
+)
 
 # Wire adapter incoming → application router (existing behavior)
 for a in adapters.values():
