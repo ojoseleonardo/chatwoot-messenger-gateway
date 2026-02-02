@@ -26,7 +26,7 @@ ENV POETRY_NO_INTERACTION=1 \
     POETRY_CACHE_DIR=/opt/poetry-cache
 
 # Install dependencies
-RUN /opt/poetry/bin/poetry install --no-dev --no-root
+RUN /opt/poetry/bin/poetry install --only main --no-root
 
 # Stage 2: Runtime
 FROM python:3.11-slim
