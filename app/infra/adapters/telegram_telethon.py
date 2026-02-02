@@ -297,7 +297,8 @@ class TelegramAdapter(MessengerAdapter):
         path: Optional[str] = None
         try:
             entity = await self._resolve_entity(recipient_id)
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            # Chatwoot Active Storage devolve 302; é preciso seguir o redirect
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 r = await client.get(url)
                 r.raise_for_status()
                 ext = ".ogg" if content.media_type == "audio" else ".m4a"
