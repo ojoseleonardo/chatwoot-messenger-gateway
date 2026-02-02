@@ -157,9 +157,13 @@ class ChatwootService:
             contact_id=contact_id,
             **extra,
         )
-        conv_id = (created or {}).get("id") or (
-            (created or {}).get("payload") or {}
-        ).get("id")
+        payload = (created or {}).get("payload") or {}
+        conv = payload.get("conversation") or {}
+        conv_id = (
+            (created or {}).get("id")
+            or conv.get("id")
+            or payload.get("id")
+        )
         logger.info("[chatwoot] create conversation id=%s inbox=%s", conv_id, inbox_id)
         return int(conv_id)
 

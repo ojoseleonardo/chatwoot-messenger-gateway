@@ -160,11 +160,15 @@ class ChatwootClient:
         self,
         conversation_id: int,
         content: str,
+        message_type: str = "incoming",
         **extra_fields: Any,
     ) -> Dict[str, Any]:
-        """Send a message to a conversation."""
+        """Send a message to a conversation. Chatwoot API expects content and message_type."""
         url = f"{self._account_base}/conversations/{conversation_id}/messages"
-        payload: Dict[str, Any] = {"content": content}
+        payload: Dict[str, Any] = {
+            "content": content,
+            "message_type": message_type,
+        }
         if extra_fields:
             payload.update(extra_fields)
 
