@@ -1,11 +1,15 @@
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List
 
-from app.domain.message import TextContent
+from app.domain.message import MediaContent, TextContent
 from app.domain.ports import MessengerAdapter
 from app.domain.webhooks.chatwoot import ChatwootMessageCreatedWebhook
 
 logger = logging.getLogger(__name__)
+
+# Extensões de áudio aceites para enviar como voice/audio no Telegram
+AUDIO_EXTENSIONS = {"ogg", "oga", "m4a", "mp3", "opus", "wav"}
+AUDIO_FILE_TYPES = {"audio", "voice"}
 
 
 def _dig(src: dict, *path, default=None):
@@ -110,6 +114,29 @@ class MessageRouter:
         # Other channels: do not guess
         return None
 
+    def _first_audio_attachment(
+        self, attachments: List[Dict[str, Any]]
+    ) -> MediaContent | None:
+        """Extrai o primeiro anexo de áudio (data_url) para enviar ao Telegram."""
+        for att in attachments:
+            if not isinstance(att, dict):
+                continue
+            file_type = (att.get("file_type") or "").lower()
+            ext = (att.get("extension") or "").lstrip(".").lower()
+            data_url = (att.get("data_url") or att.get("file_url") or "").strip()
+            if not data_url:
+                continue
+            if file_type in AUDIO_FILE_TYPES or ext in AUDIO_EXTENSIONS:
+                return MediaContent(
+                    type="media",
+                    media_type="audio",
+                    url=data_url,
+                    caption=None,
+                    filename=att.get("filename"),
+                    mime_type=att.get("content_type"),
+                )
+        return None
+
     async def handle_outgoing(self, payload: dict) -> None:
         """
         Process Chatwoot outgoing webhook and dispatch text to a proper adapter.
@@ -138,18 +165,51 @@ class MessageRouter:
         # Always derive recipient_id (Chatwoot never provides it)
         recipient_id = self._derive_recipient_id(channel=channel, payload=payload)
 
-        if not channel or not recipient_id or not text:
+        if not channel or not recipient_id:
             logger.warning(
-                "[router] Missing fields: channel=%r recipient_id=%r text=%r",
+                "[router] Missing fields: channel=%r recipient_id=%r",
                 channel,
                 recipient_id,
-                text,
             )
             return
 
-        await self.dispatch_outbound(
-            channel=channel, recipient_id=recipient_id, text=text
-        )
+        # Anexos: payload pode ter "attachments" no topo, em content_attributes ou em message
+        attachments: List[Dict[str, Any]] = payload.get("attachments") or []
+        if not attachments and isinstance(_dig(payload, "content_attributes"), dict):
+            attachments = _dig(payload, "content_attributes", "attachments") or []
+        if not attachments:
+            attachments = _dig(payload, "message", "attachments") or []
+
+        # Exige texto OU pelo menos um anexo (ex.: áudio)
+        if not text and not attachments:
+            logger.warning(
+                "[router] Missing content: channel=%r recipient_id=%r text=%r attachments=%s",
+                channel,
+                recipient_id,
+                text,
+                len(attachments),
+            )
+            return
+
+        if text:
+            await self.dispatch_outbound(
+                channel=channel, recipient_id=recipient_id, text=text
+            )
+
+        # Primeiro anexo de áudio: enviar como media (voice no Telegram)
+        if attachments and channel == "telegram":
+            first_audio = self._first_audio_attachment(attachments)
+            if first_audio:
+                await self.dispatch_outbound_media(
+                    channel=channel,
+                    recipient_id=recipient_id,
+                    media=first_audio,
+                )
+            elif not text:
+                logger.warning(
+                    "[router] No text and no audio attachment found: attachments=%s",
+                    [a.get("file_type") for a in attachments],
+                )
 
     async def dispatch_outbound(
         self, channel: str, recipient_id: str, text: str
@@ -166,4 +226,21 @@ class MessageRouter:
             channel,
             recipient_id,
             text,
+        )
+
+    async def dispatch_outbound_media(
+        self, channel: str, recipient_id: str, media: MediaContent
+    ) -> None:
+        """Send media (e.g. áudio) via selected channel adapter."""
+        adapter = self.adapters.get(channel)
+        if not adapter:
+            logger.warning("[router] No adapter for channel=%s", channel)
+            return
+
+        await adapter.send_media(recipient_id, media)
+        logger.info(
+            "[router] OUTBOUND MEDIA: channel=%s recipient_id=%s media_type=%s",
+            channel,
+            recipient_id,
+            media.media_type,
         )

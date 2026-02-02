@@ -9,8 +9,10 @@ from typing import Optional
 from pyee.asyncio import AsyncIOEventEmitter
 from telethon import TelegramClient, errors, events, functions, types
 
+import httpx
+
 from app.config import TelegramConfig
-from app.domain.message import TextContent
+from app.domain.message import MediaContent, TextContent
 from app.domain.ports import MessengerAdapter, OnMessage
 
 logger = logging.getLogger(__name__)
@@ -105,7 +107,7 @@ class TelegramAdapter(MessengerAdapter):
                         "audio/ogg" if is_voice else "audio/mpeg"
                     )
                     if not payload["text"]:
-                        payload["text"] = "(áudio)"
+                        payload["text"] = ""
                     logger.info(
                         "[telegram] INCOMING: from=%s áudio/voice -> Chatwoot",
                         from_id,
@@ -274,3 +276,49 @@ class TelegramAdapter(MessengerAdapter):
 
         except Exception as e:
             logger.exception("[telegram] Failed to send text: %s", e)
+
+    async def send_media(
+        self, recipient_id: str, content: MediaContent
+    ) -> None:
+        """
+        Download media from URL and send to Telegram (voice/audio).
+        Used when Chatwoot envia áudio para o contacto.
+        """
+        if not self.client or not self.client.is_connected():
+            logger.warning("[telegram] client is not connected; skipping send_media")
+            return
+
+        url = str(content.url).strip()
+        if not url:
+            logger.warning("[telegram] send_media: url vazia")
+            return
+
+        # URL relativa (ex.: Chatwoot /rails/...) precisa de base; por agora assumir absoluta
+        path: Optional[str] = None
+        try:
+            entity = await self._resolve_entity(recipient_id)
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                r = await client.get(url)
+                r.raise_for_status()
+                ext = ".ogg" if content.media_type == "audio" else ".m4a"
+                fd, path = tempfile.mkstemp(suffix=ext)
+                os.close(fd)
+                with open(path, "wb") as f:
+                    f.write(r.content)
+            # Enviar como voice para áudio (nota de voz no Telegram)
+            is_voice = content.media_type == "audio"
+            await self.client.send_file(entity, path, voice_note=is_voice)
+            logger.info(
+                "[telegram] SENT MEDIA: %s -> %s (voice=%s)",
+                recipient_id,
+                content.media_type,
+                is_voice,
+            )
+        except Exception as e:
+            logger.exception("[telegram] Failed to send_media: %s", e)
+        finally:
+            if path and os.path.isfile(path):
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass

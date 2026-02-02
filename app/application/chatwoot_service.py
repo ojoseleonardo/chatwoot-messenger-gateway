@@ -213,7 +213,7 @@ class ChatwootService:
         message_type = "incoming" if direction == "incoming" else "outgoing"
         res = await self._client.send_message_with_attachment(
             conversation_id=conversation_id,
-            content=content or "(áudio)",
+            content=content or "",
             file_path=file_path,
             message_type=message_type,
             content_type=content_type,

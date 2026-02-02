@@ -245,7 +245,7 @@ def wire_events(
                 if attachment_path and os.path.isfile(attachment_path):
                     await cw.create_message_with_attachment(
                         conversation_id=conv_id,
-                        content=text or "(áudio)",
+                        content=text or "",
                         file_path=attachment_path,
                         direction="incoming",
                         content_type=attachment_content_type,
@@ -315,7 +315,7 @@ def wire_events(
                 if attachment_path and os.path.isfile(attachment_path):
                     await cw.create_message_with_attachment(
                         conversation_id=conv_id,
-                        content=text or "(áudio)",
+                        content=text or "",
                         file_path=attachment_path,
                         direction="outgoing",
                         content_type=attachment_content_type,

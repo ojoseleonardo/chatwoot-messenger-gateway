@@ -195,7 +195,7 @@ class ChatwootClient:
         filename = os.path.basename(file_path)
         with open(file_path, "rb") as f:
             files = {"attachments[]": (filename, f, content_type)}
-            data = {"content": content or "(áudio)", "message_type": message_type}
+            data = {"content": content or "", "message_type": message_type}
             async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
                 r = await client.post(url, data=data, files=files)
                 r.raise_for_status()
