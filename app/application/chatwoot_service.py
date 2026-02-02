@@ -34,9 +34,15 @@ class ChatwootService:
         contacts = []
 
         vk_user_id = (custom_attributes or {}).get("vk_user_id")
+        telegram_user_id = (custom_attributes or {}).get("telegram_user_id")
         vk_identifier = f"vk:{vk_user_id}" if vk_user_id else None
+        # Identifier para Telegram: permite que search encontre o contacto depois (filter dá 422 em muitas instâncias)
+        tg_identifier = (
+            f"telegram:{telegram_user_id}" if telegram_user_id else None
+        )
+        identifier = vk_identifier or tg_identifier
 
-        # 1) Attribute-based lookup
+        # 1) Attribute-based lookup (filter pode dar 422 se custom_attributes não forem suportados)
         attr_lookup_keys = [
             k
             for k in ("vk_user_id", "telegram_user_id")
@@ -51,13 +57,23 @@ class ChatwootService:
             except Exception as e:
                 logger.warning("[chatwoot] filter_contacts failed: %s", e)
 
-        # 2) Fallback search
+        # 2) Fallback search: para Telegram, procurar por identifier que definimos ao criar
         if not contacts:
-            try:
-                res = await self._client.search_contacts(q=search_key)
-                contacts = (res or {}).get("payload") or []
-            except Exception as e:
-                logger.warning("[chatwoot] search_contacts failed: %s", e)
+            search_queries = []
+            if tg_identifier:
+                search_queries.append(tg_identifier)
+            if search_key and search_key not in search_queries:
+                search_queries.append(search_key)
+            for q in search_queries:
+                try:
+                    res = await self._client.search_contacts(q=q)
+                    contacts = (res or {}).get("payload") or []
+                    if isinstance(contacts, dict):
+                        contacts = contacts.get("contacts", contacts.get("payload", [])) or []
+                    if contacts:
+                        break
+                except Exception as e:
+                    logger.warning("[chatwoot] search_contacts q=%r failed: %s", q, e)
 
         # 3) Update or create
         if contacts:
@@ -71,7 +87,7 @@ class ChatwootService:
                         name=None,
                         phone_number=None,
                         email=None,
-                        identifier=vk_identifier,
+                        identifier=identifier,
                         custom_attributes=custom_attributes,
                         additional_attributes=additional_attributes,  # NEW
                     )
@@ -92,7 +108,7 @@ class ChatwootService:
                 name=name or search_key,
                 phone_number=phone,
                 email=email,
-                identifier=vk_identifier,
+                identifier=identifier,
                 custom_attributes=custom_attributes or {},
                 additional_attributes=additional_attributes,  # NEW
             )
