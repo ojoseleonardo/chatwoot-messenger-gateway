@@ -42,6 +42,7 @@ if config.vk:
 router = MessageRouter(
     adapters=adapters,
     chatwoot_base_url=str(config.chatwoot.base_url),
+    bus=bus,
 )
 
 # Wire adapter incoming → application router (existing behavior)

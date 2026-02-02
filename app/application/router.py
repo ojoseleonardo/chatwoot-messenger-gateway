@@ -30,10 +30,12 @@ class MessageRouter:
         self,
         adapters: Dict[str, MessengerAdapter] | None = None,
         chatwoot_base_url: str | None = None,
+        bus: Any = None,
     ):
         self.adapters = adapters or {}
         # Para resolver URLs relativas dos anexos (ex.: /rails/active_storage/...)
         self._chatwoot_base = (chatwoot_base_url or "").rstrip("/")
+        self._bus = bus
 
     async def handle_incoming(self, msg):
         # Not implemented in this demo
@@ -272,6 +274,15 @@ class MessageRouter:
             recipient_id,
             text[:80] + "..." if len(text) > 80 else text,
         )
+        # Sincronizar com Chatwoot: o evento NewMessage(outgoing) do Telethon pode não disparar a tempo
+        if self._bus:
+            to_id = (recipient_id or "").strip()
+            if to_id.startswith("id:"):
+                to_id = to_id[3:].strip()
+            self._bus.emit(
+                "telegram.outgoing",
+                {"to_id": to_id, "text": text, "username": None, "name": None},
+            )
 
     async def dispatch_outbound(
         self, channel: str, recipient_id: str, text: str
