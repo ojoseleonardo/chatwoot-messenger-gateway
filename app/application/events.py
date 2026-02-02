@@ -251,3 +251,54 @@ def wire_events(
             )
         except Exception as e:
             logger.exception("[events] telegram handling failed: %s", e)
+
+    @bus.on("telegram.outgoing")
+    async def _ingest_telegram_outgoing(payload: Dict[str, Any]) -> None:
+        """
+        Mensagens enviadas por ti no Telegram (disparos) -> Chatwoot como outgoing.
+        O contacto é o destinatário (to_id); a mensagem aparece como enviada pelo agente.
+        """
+        try:
+            text = (payload.get("text") or "").strip()
+            to_id = str(payload.get("to_id") or "")
+            username = payload.get("username")
+            name = payload.get("name") or username or to_id
+
+            inbox_id = _inbox_from_adapter("telegram")
+            if not inbox_id:
+                raise RuntimeError("Telegram inbox_id is not configured")
+
+            custom_attributes = {}
+            if to_id:
+                custom_attributes["telegram_user_id"] = to_id
+            if username:
+                custom_attributes["telegram_username"] = username
+            search_key = username or to_id
+
+            contact = await cw.ensure_contact(
+                inbox_id=inbox_id,
+                search_key=search_key,
+                name=name,
+                phone=None,
+                email=None,
+                custom_attributes=custom_attributes,
+            )
+
+            conv_id = await cw.ensure_conversation(
+                inbox_id=inbox_id,
+                contact_id=contact["id"],
+                source_id=contact["source_id"],
+            )
+
+            await cw.create_message(
+                conversation_id=conv_id,
+                content=text,
+                direction="outgoing",
+            )
+
+            logger.info(
+                "[events] telegram outgoing (disparo) -> chatwoot OK conv_id=%s",
+                conv_id,
+            )
+        except Exception as e:
+            logger.exception("[events] telegram outgoing handling failed: %s", e)

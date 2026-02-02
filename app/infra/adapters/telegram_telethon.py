@@ -97,6 +97,38 @@ class TelegramAdapter(MessengerAdapter):
             )
             self.bus.emit("telegram.incoming", payload)
 
+        # Mensagens enviadas por ti (disparos) -> enviar ao Chatwoot como outgoing
+        @self.client.on(events.NewMessage(outgoing=True))
+        async def handle_outgoing(event):
+            try:
+                peer = getattr(event, "peer_id", None) or getattr(
+                    event.message, "peer_id", None
+                )
+                if not peer:
+                    return
+                # Só conversas privadas (user); grupos têm peer_id diferente
+                if not isinstance(peer, types.PeerUser):
+                    return
+                recipient = await self.client.get_entity(peer)
+                username = getattr(recipient, "username", None)
+                first_name = getattr(recipient, "first_name", None)
+                rid = getattr(recipient, "id", None)
+                payload = {
+                    "text": event.text,
+                    "to_id": str(rid) if rid else None,
+                    "username": username,
+                    "name": first_name or username or (str(rid) if rid else "?"),
+                }
+                logger.info(
+                    "[telegram] OUTGOING (disparo): to=%s (@%s) text=%r -> Chatwoot",
+                    rid,
+                    username or "-",
+                    (event.text or "")[:80],
+                )
+                self.bus.emit("telegram.outgoing", payload)
+            except Exception as e:
+                logger.warning("[telegram] handle_outgoing failed: %s", e)
+
         # Be gentle
         await asyncio.sleep(2)
         me = await self.client.get_me()
