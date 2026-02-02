@@ -262,9 +262,16 @@ def create_router(
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
             except (RuntimeError, Exception) as e:
+                msg = str(e)
+                # Sessão Telegram invalidada (utilizador terminou sessões no app)
+                if "authorization has been invalidated" in msg or "terminating all sessions" in msg:
+                    msg = (
+                        "Sessão do Telegram invalidada (a conta desconectou todos os dispositivos). "
+                        "Faça login de novo (ex.: scripts/login_telegram.py), atualize o ficheiro/campo de sessão e reinicie o gateway."
+                    )
                 raise HTTPException(
                     status_code=503,
-                    detail=str(e),
+                    detail=msg,
                 ) from e
             return {"status": "ok", "recipient_id": body.recipient_id}
 
