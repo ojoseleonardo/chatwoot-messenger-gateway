@@ -171,3 +171,41 @@ CHATWOOT_WEBHOOK_ID_TELEGRAM=webhook_id_do_chatwoot
 ## Validação
 
 A aplicação irá validar automaticamente as variáveis na inicialização. Se alguma variável obrigatória estiver faltando, a aplicação não iniciará e mostrará um erro indicando qual variável está faltando.
+
+## Como saber se está funcionando (Telegram)
+
+O gateway **não** mostra conversas no Chatwoot sozinho. Algo precisa **enviar** ou **receber** mensagens.
+
+### 1. Mensagens que **entram** no Chatwoot (Telegram → Chatwoot)
+
+- Alguém precisa enviar uma mensagem **para** a conta do Telegram que está logada no gateway (a conta da sessão).
+- Use outro telemóvel, outro cliente Telegram ou o Telegram Web, e envie uma mensagem **privada** para esse utilizador.
+- No terminal do gateway deve aparecer algo como:
+  - `[telegram] INCOMING: from=123456 (@user) text='...' -> será enviado ao Chatwoot`
+  - `[events] telegram -> chatwoot OK conv_id=... inbox=...`
+- No Chatwoot: abra o inbox do Telegram (`TG_INBOX_ID`); deve surgir um novo contacto e conversa com essa mensagem.
+
+Se não aparecer nada no Chatwoot, confirme:
+
+- Que a mensagem foi mesmo **para** a conta da sessão (não para um bot ou grupo).
+- Que `TG_INBOX_ID` é o ID do inbox correto no Chatwoot (Settings → Inboxes).
+- Que `CHATWOOT_BASE_URL`, `CHATWOOT_ACCOUNT_ID` e `CHATWOOT_API_ACCESS_TOKEN` estão corretos (o gateway chama a API do Chatwoot para criar contacto e mensagem).
+
+### 2. Mensagens que **saem** do Chatwoot (Chatwoot → Telegram)
+
+- O Chatwoot envia eventos para o gateway via **webhook**.
+- O gateway tem de estar acessível na URL que configuraste no Chatwoot (ex.: `https://teu-dominio.com/chatwoot/webhook/{CHATWOOT_WEBHOOK_ID_TELEGRAM}`).
+- Se o gateway estiver só em `localhost`, o Chatwoot (na nuvem) não consegue chamar o webhook. Usa um túnel (ngrok, Cloudflare Tunnel, etc.) ou coloca o gateway num servidor com URL pública.
+- No Chatwoot: Settings → Applications → Webhooks → URL = `https://.../chatwoot/webhook/{WEBHOOK_ID}` e o mesmo `WEBHOOK_ID` em `CHATWOOT_WEBHOOK_ID_TELEGRAM`.
+- Quando um agente responde no Chatwoot nessa conversa, no terminal do gateway deve aparecer:
+  - `[http] Chatwoot webhook accepted: event=message_created type=outgoing channel=telegram`
+  - `[router] OUTBOUND: channel=telegram recipient_id=... text='...'`
+  - `[telegram] SENT: ... -> ...`
+
+### 3. Resumo rápido
+
+| O que queres ver | O que fazer |
+|------------------|-------------|
+| Mensagem **no Chatwoot** | Enviar uma mensagem do Telegram **para** a conta da sessão. Ver logs `[telegram] INCOMING` e `telegram -> chatwoot OK`. |
+| Resposta **no Telegram** | Responder no Chatwoot nessa conversa; o webhook tem de apontar para o gateway com URL pública e `CHATWOOT_WEBHOOK_ID_TELEGRAM` correto. |
+| Estado do serviço | `GET /health` → 200 e `telegram.enabled: true`. O `GET /` dá 404; é normal. |

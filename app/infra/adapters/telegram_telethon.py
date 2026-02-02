@@ -89,6 +89,12 @@ class TelegramAdapter(MessengerAdapter):
                 "name": first_name or username or str(from_id),
             }
             # Emit telegram.incoming event to the bus
+            logger.info(
+                "[telegram] INCOMING: from=%s (@%s) text=%r -> será enviado ao Chatwoot",
+                from_id,
+                username or "-",
+                (event.text or "")[:80],
+            )
             self.bus.emit("telegram.incoming", payload)
 
         # Be gentle
