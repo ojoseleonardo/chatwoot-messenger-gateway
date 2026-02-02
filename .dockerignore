@@ -30,8 +30,9 @@ ENV
 .env.*.local
 .env_template
 
-# Telegram session (nunca na imagem)
+# Telegram session: ignora outros .session; session.session na raiz é copiado para a imagem
 *.session
+!session.session
 session_base64.txt
 
 # Documentation
