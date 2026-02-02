@@ -64,6 +64,11 @@ def wire_events(
     recent_gateway_sends: List[Tuple[str, str, float]] = []
     GATEWAY_SEND_TTL_SEC = 10.0
 
+    # Mensagens outgoing que nós criámos no Chatwoot (sync do Telegram) para não
+    # reenviar ao Telegram quando o Chatwoot dispara o webhook
+    recent_created_outgoing: List[Tuple[int, str, float]] = []
+    CREATED_OUTGOING_TTL_SEC = 15.0
+
     @bus.on("telegram.sent_by_gateway")
     def _record_gateway_send(payload: Dict[str, Any]) -> None:
         rid = _normalize_recipient((payload.get("to_id") or "").strip())
@@ -219,6 +224,28 @@ def wire_events(
 
     @bus.on("chatwoot.outgoing")
     async def _chatwoot_outgoing(payload: Dict[str, Any]) -> None:
+        # Se esta mensagem outgoing foi criada por nós (sync do Telegram), não reenviar ao Telegram
+        conv_id_raw = (payload.get("conversation") or {}).get("id")
+        content = (payload.get("content") or "").strip()
+        try:
+            conv_id = int(conv_id_raw) if conv_id_raw is not None else None
+        except (TypeError, ValueError):
+            conv_id = None
+        if conv_id is not None:
+            now = time.monotonic()
+            for i, (cid, txt, ts) in enumerate(recent_created_outgoing):
+                if now - ts > CREATED_OUTGOING_TTL_SEC:
+                    continue
+                if cid == conv_id and txt == content:
+                    recent_created_outgoing.pop(i)
+                    logger.debug(
+                        "[events] chatwoot.outgoing ignorado (msg criada por nós): conv_id=%s",
+                        conv_id,
+                    )
+                    return
+            # limpar entradas expiradas no início
+            while recent_created_outgoing and now - recent_created_outgoing[0][2] > CREATED_OUTGOING_TTL_SEC:
+                recent_created_outgoing.pop(0)
         await router.handle_outgoing(payload)
 
     @bus.on("telegram.incoming")
@@ -372,6 +399,13 @@ def wire_events(
                         content=text,
                         direction="outgoing",
                     )
+                # Registrar para não reenviar ao Telegram quando o Chatwoot disparar o webhook
+                now = time.monotonic()
+                while recent_created_outgoing and now - recent_created_outgoing[0][2] > CREATED_OUTGOING_TTL_SEC:
+                    recent_created_outgoing.pop(0)
+                if len(recent_created_outgoing) >= 200:
+                    recent_created_outgoing.pop(0)
+                recent_created_outgoing.append((conv_id, text or "", now))
             finally:
                 if attachment_path and os.path.isfile(attachment_path):
                     try:
