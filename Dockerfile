@@ -25,6 +25,9 @@ ENV POETRY_NO_INTERACTION=1 \
     POETRY_VENV_IN_PROJECT=1 \
     POETRY_CACHE_DIR=/opt/poetry-cache
 
+# Regenerate lock file if pyproject.toml changed (evita erro "Run poetry lock to fix the lock file")
+RUN /opt/poetry/bin/poetry lock --no-update
+
 # Install dependencies
 RUN /opt/poetry/bin/poetry install --only main --no-root
 
