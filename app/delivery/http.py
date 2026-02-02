@@ -28,7 +28,6 @@ def create_router(bus: AsyncIOEventEmitter, config: AppConfig) -> APIRouter:
             "ok": True,
             "chatwoot": {
                 "account_id": config.chatwoot.account_id,
-                "inbox_id": config.chatwoot.inbox_id,
                 "base_url": str(config.chatwoot.base_url),
                 "channels_configured": list(
                     config.chatwoot.channel_by_webhook_id.values()
@@ -90,7 +89,7 @@ def create_router(bus: AsyncIOEventEmitter, config: AppConfig) -> APIRouter:
     async def chatwoot_webhook(webhook_id: str, request: Request):
         # Determine channel by webhook_id (per-channel hooks) or fallback to legacy id
         channel = config.chatwoot.channel_by_webhook_id.get(webhook_id)
-        if not channel and webhook_id != config.chatwoot.webhook_id:
+        if not channel:
             raise HTTPException(status_code=403, detail="Unknown webhook ID")
 
         payload = await request.json()
