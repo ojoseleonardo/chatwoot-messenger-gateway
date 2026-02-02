@@ -307,6 +307,13 @@ class TelegramAdapter(MessengerAdapter):
 
         try:
             await self.client.send_message(entity, content.text)
+            # Marcar envio pelo gateway para o handler telegram.outgoing não duplicar no Chatwoot
+            resolved_id = getattr(entity, "user_id", None) or getattr(entity, "id", None)
+            if resolved_id is not None and self.bus:
+                self.bus.emit(
+                    "telegram.sent_by_gateway",
+                    {"to_id": str(resolved_id), "text": content.text},
+                )
             logger.info("[telegram] SENT: %s -> %s", recipient_id, content.text)
         except ValueError as e:
             if "Cannot find any entity" in str(e) or "corresponding to" in str(e):

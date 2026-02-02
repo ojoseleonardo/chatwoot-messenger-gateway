@@ -1,6 +1,7 @@
 import logging
 import os
-from typing import Any, Dict, Mapping, Optional
+import time
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import httpx
 from pyee.asyncio import AsyncIOEventEmitter
@@ -40,6 +41,14 @@ async def _fetch_vk_profile(
         return {}
 
 
+def _normalize_recipient(rid: str) -> str:
+    """Normaliza recipient_id para comparação (id:123 -> 123)."""
+    rid = (rid or "").strip()
+    if rid.startswith("id:"):
+        rid = rid[3:].strip()
+    return rid
+
+
 def wire_events(
     bus: AsyncIOEventEmitter,
     config: AppConfig,
@@ -50,6 +59,24 @@ def wire_events(
     Register application-level bus handlers.
     Incoming infra events are normalized and forwarded to ChatwootService.
     """
+    # Cache de envios recentes pelo gateway (webhook Chatwoot) para não duplicar
+    # no Chatwoot quando o handler telegram.outgoing recebe a mesma mensagem
+    recent_gateway_sends: List[Tuple[str, str, float]] = []
+    GATEWAY_SEND_TTL_SEC = 10.0
+
+    @bus.on("telegram.sent_by_gateway")
+    def _record_gateway_send(payload: Dict[str, Any]) -> None:
+        rid = _normalize_recipient((payload.get("to_id") or "").strip())
+        text = (payload.get("text") or "").strip()
+        if rid or text:
+            now = time.monotonic()
+            # Remover entradas expiradas
+            while recent_gateway_sends and now - recent_gateway_sends[0][2] > GATEWAY_SEND_TTL_SEC:
+                recent_gateway_sends.pop(0)
+            if len(recent_gateway_sends) >= 200:
+                recent_gateway_sends.pop(0)
+            recent_gateway_sends.append((rid, text, now))
+
     cw_client = ChatwootClient(
         api_access_token=config.chatwoot.api_access_token,
         account_id=config.chatwoot.account_id,
@@ -276,12 +303,31 @@ def wire_events(
         """
         Mensagens enviadas por ti no Telegram (disparos) -> Chatwoot como outgoing.
         O contacto é o destinatário (to_id); a mensagem aparece como enviada pelo agente.
+        Se a mensagem foi enviada pelo gateway (webhook Chatwoot), não duplicamos no Chatwoot.
         """
         try:
             text = (payload.get("text") or "").strip()
             to_id = str(payload.get("to_id") or "")
             username = payload.get("username")
             name = payload.get("name") or username or to_id
+
+            # Evitar duplicar no Chatwoot quando o envio veio do webhook (Chatwoot já tem a msg)
+            now = time.monotonic()
+            norm_to = _normalize_recipient(to_id)
+            skip = False
+            for i, (rid, txt, ts) in enumerate(recent_gateway_sends):
+                if now - ts > GATEWAY_SEND_TTL_SEC:
+                    continue
+                if (rid == norm_to or rid == to_id) and txt == text:
+                    skip = True
+                    recent_gateway_sends.pop(i)
+                    break
+            if skip:
+                logger.debug(
+                    "[events] telegram.outgoing ignorado (enviado pelo gateway): to_id=%s",
+                    to_id,
+                )
+                return
 
             inbox_id = _inbox_from_adapter("telegram")
             if not inbox_id:
