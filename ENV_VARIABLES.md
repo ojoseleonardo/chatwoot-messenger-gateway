@@ -47,13 +47,19 @@ TG_API_HASH=seu_api_hash
 TG_INBOX_ID=123
 CHATWOOT_WEBHOOK_ID_TELEGRAM=webhook_id_do_chatwoot
 
-# Opcional: nome da sessão (default: telegram_session → arquivo telegram_session.session)
-# TG_SESSION_NAME=minha_sessao
+# Opcional: nome da sessão (default: session → arquivo session.session)
+# TG_SESSION_NAME=session
 ```
 
-**Sessão:** é preciso ter um arquivo `.session` (criado com login Telethon no seu PC). Se não declarar `TG_SESSION_NAME`, o app usa `telegram_session.session`.
+**Sessão:** é preciso ter um arquivo `.session` (criado com login Telethon no seu PC). Se não declarar `TG_SESSION_NAME`, o app usa `session.session`. O ficheiro `session.session` pode ser commitado no repositório (os outros `*.session` continuam ignorados).
 
-**Coolify:** como o container não tem o arquivo, use `TG_SESSION_BASE64`: gere o base64 do `.session` (PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("arquivo.session"))` ou Linux: `base64 -w 0 arquivo.session`) e cole em **TG_SESSION_BASE64** nas variáveis do app.
+**Coolify (usar o ficheiro .session, sem base64):**
+1. No Coolify, no teu serviço: **Persistent Storage** (ou **Volumes**) → adiciona um volume e monta em `/data` (ou outro caminho).
+2. Coloca o ficheiro `session.session` dentro desse volume (por exemplo via SFTP, ou exec no container e upload do ficheiro).
+3. Nas **Variáveis** do serviço, define: `TG_SESSION_PATH=/data/session.session` (ajusta o caminho se montaste noutro sítio).
+4. O app usa esse ficheiro; não precisas de `TG_SESSION_BASE64`.
+
+**Coolify (alternativa com base64):** se preferires não montar volume, podes usar `TG_SESSION_BASE64` com o base64 do `.session` (script: `py -3 scripts/export_session_base64.py`).
 
 **Como funciona a integração:**
 - `TG_INBOX_ID` → Define qual inbox do Chatwoot receberá as mensagens do Telegram
@@ -137,7 +143,7 @@ CHATWOOT_WEBHOOK_ID_VK=webhook_id_do_chatwoot
 
 - **Chatwoot**: Sempre obrigatório (3 variáveis) - identifica qual Chatwoot usar
 - **WhatsApp**: Opcional, mas se usar, precisa de 5 variáveis
-- **Telegram**: Opcional, mas se usar, precisa de 4 variáveis (TG_SESSION_NAME opcional)  
+- **Telegram**: Opcional, mas se usar, precisa de 4 variáveis (TG_SESSION_NAME opcional; default: session)  
 - **VK**: Opcional, mas se usar, precisa de 7 variáveis
 
 ## Exemplo: Configuração Mínima (Apenas Telegram)
@@ -148,7 +154,7 @@ CHATWOOT_BASE_URL=https://seu-chatwoot.com
 CHATWOOT_ACCOUNT_ID=123
 CHATWOOT_API_ACCESS_TOKEN=seu_token_aqui
 
-# Telegram (TG_SESSION_NAME opcional; default: telegram_session)
+# Telegram (TG_SESSION_NAME opcional; default: session)
 TG_API_ID=12345678
 TG_API_HASH=seu_api_hash
 TG_INBOX_ID=123

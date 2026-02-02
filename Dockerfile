@@ -62,6 +62,9 @@ RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app
 USER appuser
 
+# Ponto de montagem para sessão Telegram (Coolify: monta volume aqui e define TG_SESSION_PATH=/data/session.session)
+VOLUME /data
+
 # Expose port (Coolify will set PORT env var)
 ENV PORT=8000
 EXPOSE 8000

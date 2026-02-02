@@ -175,5 +175,7 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
+# Ficheiros .session ignorados, exceto session.session (pode subir para o repo)
 *.session
+!session.session
 session_base64.txt

@@ -34,27 +34,34 @@ class TelegramAdapter(MessengerAdapter):
         self._cb = cb
 
     async def start(self) -> None:
-        # Coolify / deploy sem terminal: sessão pronta via TG_SESSION_BASE64
-        session_b64 = os.getenv("TG_SESSION_BASE64", "").strip()
-        if session_b64:
+        # 1) Ficheiro montado no Coolify (ex.: volume com session.session)
+        session_path_env = os.getenv("TG_SESSION_PATH", "").strip()
+        if session_path_env and os.path.isfile(session_path_env):
+            session_path_or_name = session_path_env
+            logger.info("[telegram] using session file from TG_SESSION_PATH=%s", session_path_env)
+        else:
+            # 2) Base64 na env (fallback)
             session_path = os.path.join(
                 os.getcwd(), f"{self._cfg.session_name}.session"
             )
-            try:
-                data = base64.b64decode(session_b64, validate=True)
-                with open(session_path, "wb") as f:
-                    f.write(data)
-                logger.info(
-                    "[telegram] session file written from TG_SESSION_BASE64"
-                )
-            except Exception as e:
-                logger.warning(
-                    "[telegram] failed to write session from TG_SESSION_BASE64: %s",
-                    e,
-                )
+            session_b64 = os.getenv("TG_SESSION_BASE64", "").strip()
+            if session_b64:
+                try:
+                    data = base64.b64decode(session_b64, validate=True)
+                    with open(session_path, "wb") as f:
+                        f.write(data)
+                    logger.info(
+                        "[telegram] session file written from TG_SESSION_BASE64"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "[telegram] failed to write session from TG_SESSION_BASE64: %s",
+                        e,
+                    )
+            session_path_or_name = self._cfg.session_name
 
         self.client = TelegramClient(
-            self._cfg.session_name,
+            session_path_or_name,
             self._cfg.api_id,
             self._cfg.api_hash,
             device_model="iPhone 14",
