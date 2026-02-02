@@ -31,6 +31,9 @@ RUN /opt/poetry/bin/poetry lock
 # Install dependencies
 RUN /opt/poetry/bin/poetry install --only main --no-root
 
+# Poetry 2 cria o venv no cache; copiar para /app/.venv para o stage 2
+RUN VENV_PATH=$(/opt/poetry/bin/poetry env info -p) && cp -a "$VENV_PATH" /app/.venv
+
 # Stage 2: Runtime
 FROM python:3.11-slim
 
