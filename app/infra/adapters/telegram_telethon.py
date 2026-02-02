@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import logging
+import os
 import re
 from typing import Optional
 
@@ -32,6 +34,25 @@ class TelegramAdapter(MessengerAdapter):
         self._cb = cb
 
     async def start(self) -> None:
+        # Coolify / deploy sem terminal: sessão pronta via TG_SESSION_BASE64
+        session_b64 = os.getenv("TG_SESSION_BASE64", "").strip()
+        if session_b64:
+            session_path = os.path.join(
+                os.getcwd(), f"{self._cfg.session_name}.session"
+            )
+            try:
+                data = base64.b64decode(session_b64, validate=True)
+                with open(session_path, "wb") as f:
+                    f.write(data)
+                logger.info(
+                    "[telegram] session file written from TG_SESSION_BASE64"
+                )
+            except Exception as e:
+                logger.warning(
+                    "[telegram] failed to write session from TG_SESSION_BASE64: %s",
+                    e,
+                )
+
         self.client = TelegramClient(
             self._cfg.session_name,
             self._cfg.api_id,

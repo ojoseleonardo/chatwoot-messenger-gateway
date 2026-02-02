@@ -30,15 +30,16 @@ ENV
 .env.*.local
 .env_template
 
+# Telegram session (nunca na imagem)
+*.session
+session_base64.txt
+
 # Documentation
 *.md
 README*.md
 
 # Scripts (opcional, se não forem necessários em runtime)
 scripts/
-
-# Poetry
-poetry.lock
 
 # OS
 .DS_Store
@@ -53,6 +54,10 @@ logs
 .coverage
 htmlcov
 
-# Linting
+# Linting / dev (não necessário em runtime)
 .flake8
+.black.toml
+.isort.cfg
+.pylintrc
+.pre-commit-config.yaml
 .mypy_cache

@@ -69,17 +69,13 @@ def _build_channel_map() -> Dict[str, str]:
 
 def load_config() -> AppConfig:
     try:
-        # Telegram config: only if all variables are present
-        if (
-            os.getenv("TG_API_ID")
-            and os.getenv("TG_API_HASH")
-            and os.getenv("TG_SESSION_NAME")
-        ):
+        # Telegram config: TG_API_ID + TG_API_HASH + TG_INBOX_ID; TG_SESSION_NAME opcional (default: telegram_session)
+        if os.getenv("TG_API_ID") and os.getenv("TG_API_HASH") and os.getenv("TG_INBOX_ID"):
             telegram_cfg = TelegramConfig(
                 api_id=int(_getenv("TG_API_ID")),
                 api_hash=_getenv("TG_API_HASH"),
-                session_name=_getenv("TG_SESSION_NAME"),
-                inbox_id=int(os.getenv("TG_INBOX_ID")),
+                session_name=os.getenv("TG_SESSION_NAME", "").strip() or "telegram_session",
+                inbox_id=int(_getenv("TG_INBOX_ID")),
             )
         else:
             telegram_cfg = None
