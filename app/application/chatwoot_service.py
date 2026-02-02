@@ -199,3 +199,32 @@ class ChatwootService:
         msg_id = (res or {}).get("id") or ((res or {}).get("payload") or {}).get("id")
         logger.info("[chatwoot] create_message id=%s type=%s", msg_id, message_type)
         return int(msg_id)
+
+    async def create_message_with_attachment(
+        self,
+        *,
+        conversation_id: int,
+        content: str,
+        file_path: str,
+        direction: Literal["incoming", "outgoing"],
+        content_type: Optional[str] = None,
+    ) -> int:
+        """Create message with file attachment (áudio/voice)."""
+        message_type = "incoming" if direction == "incoming" else "outgoing"
+        res = await self._client.send_message_with_attachment(
+            conversation_id=conversation_id,
+            content=content or "(áudio)",
+            file_path=file_path,
+            message_type=message_type,
+            content_type=content_type,
+        )
+        payload = (res or {}).get("payload") or {}
+        msg_id = (res or {}).get("id") or payload.get("id")
+        if not msg_id and isinstance(payload, dict):
+            msg = payload.get("message") or payload.get("messages", [{}])
+            if isinstance(msg, list) and msg:
+                msg_id = msg[0].get("id")
+            elif isinstance(msg, dict):
+                msg_id = msg.get("id")
+        logger.info("[chatwoot] create_message_with_attachment id=%s type=%s", msg_id, message_type)
+        return int(msg_id) if msg_id else 0

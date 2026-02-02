@@ -3,6 +3,7 @@ import base64
 import logging
 import os
 import re
+import tempfile
 from typing import Optional
 
 from pyee.asyncio import AsyncIOEventEmitter
@@ -83,18 +84,41 @@ class TelegramAdapter(MessengerAdapter):
 
             # Build message payload for internal bus
             payload = {
-                "text": event.text,
+                "text": event.text or "",
                 "from_id": str(from_id) if from_id else None,
                 "username": username,
                 "name": first_name or username or str(from_id),
             }
-            # Emit telegram.incoming event to the bus
-            logger.info(
-                "[telegram] INCOMING: from=%s (@%s) text=%r -> será enviado ao Chatwoot",
-                from_id,
-                username or "-",
-                (event.text or "")[:80],
-            )
+            # Áudio/voice: descarregar e anexar ao payload
+            msg = getattr(event, "message", event)
+            media = getattr(msg, "media", None)
+            is_voice = bool(getattr(msg, "voice", False))
+            is_audio = bool(getattr(msg, "audio", False))
+            if media is not None and (is_voice or is_audio):
+                try:
+                    ext = ".ogg" if is_voice else ".m4a"
+                    fd, path = tempfile.mkstemp(suffix=ext)
+                    os.close(fd)
+                    await self.client.download_media(msg, file=path)
+                    payload["attachment_path"] = path
+                    payload["attachment_content_type"] = (
+                        "audio/ogg" if is_voice else "audio/mpeg"
+                    )
+                    if not payload["text"]:
+                        payload["text"] = "(áudio)"
+                    logger.info(
+                        "[telegram] INCOMING: from=%s áudio/voice -> Chatwoot",
+                        from_id,
+                    )
+                except Exception as e:
+                    logger.warning("[telegram] download media failed: %s", e)
+            if "attachment_path" not in payload:
+                logger.info(
+                    "[telegram] INCOMING: from=%s (@%s) text=%r -> será enviado ao Chatwoot",
+                    from_id,
+                    username or "-",
+                    (payload["text"] or "")[:80],
+                )
             self.bus.emit("telegram.incoming", payload)
 
         # Mensagens enviadas por ti (disparos) -> enviar ao Chatwoot como outgoing
@@ -114,17 +138,41 @@ class TelegramAdapter(MessengerAdapter):
                 first_name = getattr(recipient, "first_name", None)
                 rid = getattr(recipient, "id", None)
                 payload = {
-                    "text": event.text,
+                    "text": event.text or "",
                     "to_id": str(rid) if rid else None,
                     "username": username,
                     "name": first_name or username or (str(rid) if rid else "?"),
                 }
-                logger.info(
-                    "[telegram] OUTGOING (disparo): to=%s (@%s) text=%r -> Chatwoot",
-                    rid,
-                    username or "-",
-                    (event.text or "")[:80],
-                )
+                # Áudio/voice nos disparos
+                msg = getattr(event, "message", event)
+                media = getattr(msg, "media", None)
+                is_voice = bool(getattr(msg, "voice", False))
+                is_audio = bool(getattr(msg, "audio", False))
+                if media is not None and (is_voice or is_audio):
+                    try:
+                        ext = ".ogg" if is_voice else ".m4a"
+                        fd, path = tempfile.mkstemp(suffix=ext)
+                        os.close(fd)
+                        await self.client.download_media(msg, file=path)
+                        payload["attachment_path"] = path
+                        payload["attachment_content_type"] = (
+                            "audio/ogg" if is_voice else "audio/mpeg"
+                        )
+                        if not payload["text"]:
+                            payload["text"] = "(áudio)"
+                        logger.info(
+                            "[telegram] OUTGOING (disparo): to=%s áudio/voice -> Chatwoot",
+                            rid,
+                        )
+                    except Exception as e:
+                        logger.warning("[telegram] download media (outgoing) failed: %s", e)
+                else:
+                    logger.info(
+                        "[telegram] OUTGOING (disparo): to=%s (@%s) text=%r -> Chatwoot",
+                        rid,
+                        username or "-",
+                        (payload["text"] or "")[:80],
+                    )
                 self.bus.emit("telegram.outgoing", payload)
             except Exception as e:
                 logger.warning("[telegram] handle_outgoing failed: %s", e)

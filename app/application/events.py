@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Any, Dict, Mapping, Optional
 
 import httpx
@@ -238,11 +239,29 @@ def wire_events(
                 source_id=contact["source_id"],
             )
 
-            await cw.create_message(
-                conversation_id=conv_id,
-                content=text,
-                direction="incoming",
-            )
+            attachment_path = payload.get("attachment_path")
+            attachment_content_type = payload.get("attachment_content_type")
+            try:
+                if attachment_path and os.path.isfile(attachment_path):
+                    await cw.create_message_with_attachment(
+                        conversation_id=conv_id,
+                        content=text or "(áudio)",
+                        file_path=attachment_path,
+                        direction="incoming",
+                        content_type=attachment_content_type,
+                    )
+                else:
+                    await cw.create_message(
+                        conversation_id=conv_id,
+                        content=text,
+                        direction="incoming",
+                    )
+            finally:
+                if attachment_path and os.path.isfile(attachment_path):
+                    try:
+                        os.unlink(attachment_path)
+                    except OSError:
+                        pass
 
             logger.info(
                 "[events] telegram -> chatwoot OK conv_id=%s inbox=%s",
@@ -290,11 +309,29 @@ def wire_events(
                 source_id=contact["source_id"],
             )
 
-            await cw.create_message(
-                conversation_id=conv_id,
-                content=text,
-                direction="outgoing",
-            )
+            attachment_path = payload.get("attachment_path")
+            attachment_content_type = payload.get("attachment_content_type")
+            try:
+                if attachment_path and os.path.isfile(attachment_path):
+                    await cw.create_message_with_attachment(
+                        conversation_id=conv_id,
+                        content=text or "(áudio)",
+                        file_path=attachment_path,
+                        direction="outgoing",
+                        content_type=attachment_content_type,
+                    )
+                else:
+                    await cw.create_message(
+                        conversation_id=conv_id,
+                        content=text,
+                        direction="outgoing",
+                    )
+            finally:
+                if attachment_path and os.path.isfile(attachment_path):
+                    try:
+                        os.unlink(attachment_path)
+                    except OSError:
+                        pass
 
             logger.info(
                 "[events] telegram outgoing (disparo) -> chatwoot OK conv_id=%s",

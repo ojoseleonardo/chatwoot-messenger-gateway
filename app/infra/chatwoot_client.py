@@ -1,3 +1,4 @@
+import os
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -176,3 +177,26 @@ class ChatwootClient:
             r = await client.post(url, json=payload)
             r.raise_for_status()
             return r.json()
+
+    async def send_message_with_attachment(
+        self,
+        conversation_id: int,
+        content: str,
+        file_path: str,
+        message_type: str = "incoming",
+        content_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Send a message with file attachment (multipart/form-data). Used for áudio/voice."""
+        url = f"{self._account_base}/conversations/{conversation_id}/messages"
+        headers = {
+            k: v for k, v in self._headers.items() if k.lower() != "content-type"
+        }
+        content_type = content_type or "application/octet-stream"
+        filename = os.path.basename(file_path)
+        with open(file_path, "rb") as f:
+            files = {"attachments[]": (filename, f, content_type)}
+            data = {"content": content or "(áudio)", "message_type": message_type}
+            async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
+                r = await client.post(url, data=data, files=files)
+                r.raise_for_status()
+                return r.json()
