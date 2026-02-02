@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Messaging Bridge", version="0.1.0", lifespan=lifespan)
-app.include_router(create_router(bus=bus, config=config))
+app.include_router(create_router(bus=bus, config=config, message_router=router))
 
 if __name__ == "__main__":
     uvicorn.run("app.main:app", host="127.0.0.1", port=8000, log_level="info")

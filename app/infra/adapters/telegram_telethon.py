@@ -251,6 +251,20 @@ class TelegramAdapter(MessengerAdapter):
         # Anything else is not supported
         raise ValueError("recipient_id must be @username, phone number, or id:<int>")
 
+    async def set_typing(self, recipient_id: str, typing: bool = True) -> None:
+        """
+        Mostra ou cancela o indicador de digitação (typing) para o destinatário.
+        Usado pelo endpoint de disparo manual antes de enviar a mensagem.
+        """
+        if not self.client or not self.client.is_connected():
+            return
+        try:
+            entity = await self._resolve_entity(recipient_id)
+            action = "typing" if typing else "cancel"
+            await self.client.action(entity, action)
+        except Exception as e:
+            logger.debug("[telegram] set_typing failed: %s", e)
+
     async def send_text(self, recipient_id: str, content: TextContent) -> None:
         """
         Send a simple text message, resolving the recipient first.

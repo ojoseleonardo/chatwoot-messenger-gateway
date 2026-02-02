@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Any, Dict, List
 
@@ -224,6 +225,39 @@ class MessageRouter:
                     "[router] No text and no audio attachment found: attachments=%s",
                     [a.get("file_type") for a in attachments],
                 )
+
+    async def dispatch_direct(
+        self,
+        channel: str,
+        recipient_id: str,
+        text: str,
+        typing_seconds: float = 2.0,
+    ) -> None:
+        """
+        Envia texto para um destinatário no Telegram.
+        Mostra indicador de digitação (typing) pelo tempo informado antes de enviar.
+        """
+        if channel != "telegram":
+            raise ValueError("O endpoint /dispatch é apenas para Telegram")
+        adapter = self.adapters.get(channel)
+        if not adapter:
+            raise ValueError("Telegram não está configurado")
+
+        if typing_seconds > 0:
+            set_typing = getattr(adapter, "set_typing", None)
+            if callable(set_typing):
+                try:
+                    await set_typing(recipient_id, typing=True)
+                    await asyncio.sleep(typing_seconds)
+                except Exception as e:
+                    logger.warning("[router] set_typing falhou (ignorado): %s", e)
+
+        await adapter.send_text(recipient_id, TextContent(type="text", text=text))
+        logger.info(
+            "[router] DISPATCH: recipient_id=%s text=%r",
+            recipient_id,
+            text[:80] + "..." if len(text) > 80 else text,
+        )
 
     async def dispatch_outbound(
         self, channel: str, recipient_id: str, text: str

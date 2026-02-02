@@ -1,17 +1,36 @@
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
+from pydantic import BaseModel, Field
 from pyee.asyncio import AsyncIOEventEmitter
 from starlette.responses import PlainTextResponse
 
+from app.application.router import MessageRouter
 from app.config import AppConfig
 from app.domain.webhooks.wasender import WasenderWebhookPayload
 
 logger = logging.getLogger(__name__)
 
 
-def create_router(bus: AsyncIOEventEmitter, config: AppConfig) -> APIRouter:
+class DispatchBody(BaseModel):
+    """Corpo do endpoint de disparo manual (apenas Telegram): destinatário, texto e tempo de typing."""
+
+    recipient_id: str = Field(..., min_length=1, description="ID do destinatário (ex: @user, id:123)")
+    text: str = Field(..., min_length=1, description="Texto da mensagem")
+    typing_seconds: float = Field(
+        default=2.0,
+        ge=0,
+        le=60,
+        description="Segundos que o indicador de digitação fica ativo antes de enviar (0 = sem typing)",
+    )
+
+
+def create_router(
+    bus: AsyncIOEventEmitter,
+    config: AppConfig,
+    message_router: Optional[MessageRouter] = None,
+) -> APIRouter:
     """
     Build HTTP routes with simple security checks.
     """
@@ -184,5 +203,40 @@ def create_router(bus: AsyncIOEventEmitter, config: AppConfig) -> APIRouter:
 
         # VK requires literal 'ok' to acknowledge processing
         return PlainTextResponse("ok")
+
+    # Endpoint de disparo manual (requer DISPATCH_API_TOKEN)
+    if config.dispatch_api_token and message_router is not None:
+
+        def _check_dispatch_token(authorization: str | None = Header(default=None)):
+            if not authorization or not authorization.startswith("Bearer "):
+                raise HTTPException(
+                    status_code=401,
+                    detail="Header Authorization: Bearer <token> obrigatório",
+                )
+            token = authorization[7:].strip()
+            if token != config.dispatch_api_token:
+                raise HTTPException(status_code=403, detail="Token inválido")
+
+        @router.post("/dispatch", response_model=dict)
+        async def dispatch(
+            body: DispatchBody,
+            authorization: str | None = Header(default=None, alias="Authorization"),
+        ):
+            """
+            Envia uma mensagem de texto para qualquer destinatário no Telegram.
+            Mostra indicador de digitação (typing) pelo tempo informado em typing_seconds antes de enviar.
+            Autenticação: header Authorization: Bearer <DISPATCH_API_TOKEN>.
+            """
+            _check_dispatch_token(authorization)
+            try:
+                await message_router.dispatch_direct(
+                    channel="telegram",
+                    recipient_id=body.recipient_id.strip(),
+                    text=body.text.strip(),
+                    typing_seconds=body.typing_seconds,
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            return {"status": "ok", "recipient_id": body.recipient_id}
 
     return router

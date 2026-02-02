@@ -42,6 +42,8 @@ class AppConfig(BaseModel):
     wasender: Optional[WasenderWebhookConfig] = None
     vk: Optional[VKCommunityConfig] = None
     chatwoot: ChatwootWebhookConfig
+    # Token para o endpoint de disparo manual (DISPATCH_API_TOKEN). Se vazio, o endpoint fica desativado.
+    dispatch_api_token: Optional[str] = None
 
 
 def _getenv(name: str) -> str:
@@ -115,6 +117,8 @@ def load_config() -> AppConfig:
         else:
             vk_cfg = None
 
+        dispatch_token = (os.getenv("DISPATCH_API_TOKEN") or "").strip() or None
+
         return AppConfig(
             telegram=telegram_cfg,
             wasender=wasender_cfg,
@@ -125,6 +129,7 @@ def load_config() -> AppConfig:
                 base_url=_getenv("CHATWOOT_BASE_URL"),
                 channel_by_webhook_id=_build_channel_map(),
             ),
+            dispatch_api_token=dispatch_token,
         )
     except ValidationError as e:
         raise RuntimeError(f"Invalid configuration: {e}") from e

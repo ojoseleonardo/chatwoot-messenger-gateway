@@ -209,3 +209,13 @@ Se não aparecer nada no Chatwoot, confirme:
 | Mensagem **no Chatwoot** | Enviar uma mensagem do Telegram **para** a conta da sessão. Ver logs `[telegram] INCOMING` e `telegram -> chatwoot OK`. |
 | Resposta **no Telegram** | Responder no Chatwoot nessa conversa; o webhook tem de apontar para o gateway com URL pública e `CHATWOOT_WEBHOOK_ID_TELEGRAM` correto. |
 | Estado do serviço | `GET /health` → 200 e `telegram.enabled: true`. O `GET /` dá 404; é normal. |
+
+## Endpoint de disparo manual — Telegram (opcional)
+
+Para habilitar o endpoint **POST /dispatch** (envio de mensagem de texto para qualquer destinatário **no Telegram**, com tempo de typing configurável):
+
+```bash
+DISPATCH_API_TOKEN=um_token_secreto_longo
+```
+
+Se não definir `DISPATCH_API_TOKEN`, o endpoint `/dispatch` não fica disponível. Ver **README_DISPATCH.md** para uso resumido.
