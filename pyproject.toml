@@ -24,6 +24,13 @@ requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
+name = "chatwoot-integrations"
+version = "0.1.0"
+description = "Chatwoot Messenger Gateway - Integração Telegram/Chatwoot"
+authors = [
+    "@feel90d <feel90d@gmail.com>",
+    "@lukyan0v_a <forjob34@gmail.com>"
+]
 packages = [
     { include = "app" }
 ]
