@@ -208,14 +208,22 @@ class TelegramAdapter(MessengerAdapter):
         if group_invite:
             async def _prefetch_group():
                 try:
+                    logger.info(
+                        "[telegram] TG_GROUP_INVITE prefetch started (loading participants)..."
+                    )
                     group = await self.client.get_entity(group_invite)
                     n = 0
                     async for _ in self.client.iter_participants(group):
                         n += 1
+                        if n % 2000 == 0:
+                            logger.info(
+                                "[telegram] prefetch progress: %s participants",
+                                n,
+                            )
                         if n >= 15000:
                             break
                     logger.info(
-                        "[telegram] prefetched %s participants from group (TG_GROUP_INVITE)",
+                        "[telegram] prefetched %s participants from group (TG_GROUP_INVITE) — done",
                         n,
                     )
                 except Exception as e:
