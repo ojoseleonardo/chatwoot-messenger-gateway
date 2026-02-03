@@ -199,6 +199,33 @@ class TelegramAdapter(MessengerAdapter):
                 "Authorize once with Telethon to create the session file.",
                 self._cfg.session_name,
             )
+
+        # Opcional: preencher cache com participantes de um grupo (link de convite) em background.
+        # Não existe API "buscar user X no grupo"; só dá para percorrer a lista. Ao iterar, a sessão
+        # "vê" cada user e guarda na cache; depois get_entity(user_id) funciona para enviar DM.
+        # Com 12k+ membros, rodar em background para o gateway subir logo.
+        group_invite = (os.getenv("TG_GROUP_INVITE") or "").strip()
+        if group_invite:
+            async def _prefetch_group():
+                try:
+                    group = await self.client.get_entity(group_invite)
+                    n = 0
+                    async for _ in self.client.iter_participants(group):
+                        n += 1
+                        if n >= 15000:
+                            break
+                    logger.info(
+                        "[telegram] prefetched %s participants from group (TG_GROUP_INVITE)",
+                        n,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "[telegram] TG_GROUP_INVITE prefetch failed: %s",
+                        e,
+                    )
+
+            asyncio.create_task(_prefetch_group())
+
         logger.info("[telegram] adapter started (native client, text only)")
 
     async def stop(self) -> None:

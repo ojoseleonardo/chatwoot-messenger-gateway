@@ -49,6 +49,11 @@ CHATWOOT_WEBHOOK_ID_TELEGRAM=webhook_id_do_chatwoot
 
 # Opcional: nome da sessão (default: session → arquivo session.session)
 # TG_SESSION_NAME=session
+
+# Opcional: link de convite de um grupo para prefetch de participantes ao iniciar.
+# A sessão obtém a lista de membros e passa a conseguir enviar DM por user_id sem o user ter escrito antes.
+# Ex.: TG_GROUP_INVITE=https://t.me/+k-AVv-xZofoxYjJh
+# TG_GROUP_INVITE=https://t.me/+...
 ```
 
 **Sessão:** é preciso ter um arquivo `.session` (criado com login Telethon no seu PC). Se não declarar `TG_SESSION_NAME`, o app usa `session.session`. O ficheiro `session.session` pode ser commitado no repositório (os outros `*.session` continuam ignorados).
