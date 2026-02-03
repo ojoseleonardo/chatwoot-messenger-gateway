@@ -240,9 +240,7 @@ class TelegramAdapter(MessengerAdapter):
 
         try:
             group = await self.client.get_entity(group_invite)
-            async for participant in self.client.iter_participants(
-                group, offset_user=None, aggressive=False
-            ):
+            async for participant in self.client.iter_participants(group):
                 pid = getattr(participant, "id", None)
                 if pid is None:
                     continue
