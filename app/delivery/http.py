@@ -66,13 +66,14 @@ def create_router(
         telegram_enabled = bool(getattr(config, "telegram", None))
         vk_enabled = bool(getattr(config, "vk", None))
 
-        # Obter status detalhado do Telegram (se configurado)
+        # Obter status do Telegram (se configurado)
         telegram_status = None
-        if telegram_enabled and message_router and "telegram" in message_router.adapters:
-            tg_adapter = message_router.adapters["telegram"]
-            get_status = getattr(tg_adapter, "get_status", None)
-            if callable(get_status):
-                telegram_status = get_status()
+        if telegram_enabled and message_router:
+            tg_adapter = message_router.adapters.get("telegram")
+            if tg_adapter:
+                get_status = getattr(tg_adapter, "get_status", None)
+                if callable(get_status):
+                    telegram_status = get_status()
 
         return {
             "ok": True,
@@ -253,7 +254,7 @@ def create_router(
         # VK requires literal 'ok' to acknowledge processing
         return PlainTextResponse("ok")
 
-    # Endpoint de disparo manual (requer DISPATCH_API_TOKEN)
+    # Endpoints de disparo manual e membros (requerem DISPATCH_API_TOKEN)
     if config.dispatch_api_token and message_router is not None:
 
         def _check_dispatch_token(authorization: str | None = Header(default=None)):
@@ -265,6 +266,57 @@ def create_router(
             token = authorization[7:].strip()
             if token != config.dispatch_api_token:
                 raise HTTPException(status_code=403, detail="Token inválido")
+
+        @router.get("/telegram/members/next", response_model=dict)
+        async def telegram_members_next(
+            authorization: str | None = Header(default=None, alias="Authorization"),
+        ):
+            """
+            Retorna o próximo membro do grupo (TG_GROUP_INVITE) que ainda não foi retornado.
+            Ao chamar este endpoint, a sessão Telegram "vê" o user e fica com access_hash.
+            Use o access_hash retornado no /dispatch para enviar DM.
+
+            Resposta:
+              - Se há membro: {"status": "ok", "member": {...}}
+              - Se acabou: {"status": "done", "member": null, "total_returned": N}
+            """
+            _check_dispatch_token(authorization)
+            if "telegram" not in message_router.adapters:
+                raise HTTPException(status_code=503, detail="Telegram não configurado")
+
+            tg_adapter = message_router.adapters["telegram"]
+            get_next = getattr(tg_adapter, "get_next_member", None)
+            if not callable(get_next):
+                raise HTTPException(status_code=503, detail="Método get_next_member não disponível")
+
+            try:
+                member = await get_next()
+                if member is None:
+                    status_fn = getattr(tg_adapter, "get_status", None)
+                    total = status_fn()["members_returned"] if callable(status_fn) else 0
+                    return {"status": "done", "member": None, "total_returned": total}
+                return {"status": "ok", "member": member}
+            except RuntimeError as e:
+                raise HTTPException(status_code=503, detail=str(e))
+
+        @router.post("/telegram/members/reset", response_model=dict)
+        async def telegram_members_reset(
+            authorization: str | None = Header(default=None, alias="Authorization"),
+        ):
+            """
+            Reinicia o iterador de membros para começar do início.
+            """
+            _check_dispatch_token(authorization)
+            if "telegram" not in message_router.adapters:
+                raise HTTPException(status_code=503, detail="Telegram não configurado")
+
+            tg_adapter = message_router.adapters["telegram"]
+            reset_fn = getattr(tg_adapter, "reset_members_iterator", None)
+            if not callable(reset_fn):
+                raise HTTPException(status_code=503, detail="Método reset_members_iterator não disponível")
+
+            count = reset_fn()
+            return {"status": "ok", "previous_count": count}
 
         @router.post("/dispatch", response_model=dict)
         async def dispatch(
