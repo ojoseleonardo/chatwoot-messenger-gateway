@@ -205,7 +205,14 @@ class TelegramAdapter(MessengerAdapter):
         # "vê" cada user e guarda na cache; depois get_entity(user_id) funciona para enviar DM.
         # Com 12k+ membros, rodar em background para o gateway subir logo.
         group_invite = (os.getenv("TG_GROUP_INVITE") or "").strip()
+        if not group_invite:
+            logger.info(
+                "[telegram] TG_GROUP_INVITE not set — skipping group participant prefetch"
+            )
         if group_invite:
+            logger.info(
+                "[telegram] TG_GROUP_INVITE set — starting group participant prefetch in background"
+            )
             async def _prefetch_group():
                 try:
                     logger.info(
