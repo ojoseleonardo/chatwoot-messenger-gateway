@@ -291,10 +291,34 @@ class TelegramAdapter(MessengerAdapter):
             try:
                 return await self.client.get_entity(user_id)
             except (ValueError, errors.rpcerrorlist.PeerIdInvalidError):
-                raise RuntimeError(
-                    "Cannot resolve user by user_id. "
-                    "Use @username or phone number (the phone will be imported)."
-                )
+                pass
+            # Fallback: buscar no grupo (TG_GROUP_INVITE) — user pode estar além dos 10k prefetched
+            group_invite = (os.getenv("TG_GROUP_INVITE") or "").strip()
+            if group_invite:
+                try:
+                    logger.info(
+                        "[telegram] user_id %s not in cache, searching in group...",
+                        user_id,
+                    )
+                    group = await self.client.get_entity(group_invite)
+                    async for p in self.client.iter_participants(group):
+                        if getattr(p, "id", None) == user_id:
+                            logger.info(
+                                "[telegram] found user_id %s in group, sending",
+                                user_id,
+                            )
+                            return p
+                except Exception as e:
+                    logger.debug(
+                        "[telegram] group fallback for user_id %s failed: %s",
+                        user_id,
+                        e,
+                    )
+            raise RuntimeError(
+                "Destinatário '%s' não encontrado. O utilizador precisa ter iniciado "
+                "conversa com esta conta (Telegram) antes."
+                % rid
+            )
 
         # Anything else is not supported
         raise ValueError("recipient_id must be @username, phone number, or id:<int>")
