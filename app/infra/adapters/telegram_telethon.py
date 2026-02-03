@@ -292,24 +292,56 @@ class TelegramAdapter(MessengerAdapter):
                 return await self.client.get_entity(user_id)
             except (ValueError, errors.rpcerrorlist.PeerIdInvalidError):
                 pass
-            # Fallback: buscar no grupo (TG_GROUP_INVITE) — user pode estar além dos 10k prefetched
+            # Fallback: grupo (TG_GROUP_INVITE) — estratégias da API Telegram/Telethon
             group_invite = (os.getenv("TG_GROUP_INVITE") or "").strip()
             if group_invite:
                 try:
+                    group = await self.client.get_entity(group_invite)
+                    # 1) Tentar GetParticipant (um único request) — funciona se tivermos acesso
+                    try:
+                        result = await self.client(
+                            functions.channels.GetParticipantRequest(
+                                channel=group,
+                                participant=types.InputPeerUser(user_id, 0),
+                            )
+                        )
+                        # Resposta traz users[]; pegar o User com esse id
+                        for u in getattr(result, "users", []) or []:
+                            if getattr(u, "id", None) == user_id:
+                                logger.info(
+                                    "[telegram] found user_id %s via GetParticipant",
+                                    user_id,
+                                )
+                                return u
+                    except (
+                        errors.rpcerrorlist.UserIdInvalidError,
+                        errors.rpcerrorlist.UserNotParticipantError,
+                    ):
+                        pass
+                    # 2) Iterar participantes (aggressive=True para mais membros)
                     logger.info(
-                        "[telegram] user_id %s not in cache, searching in group...",
+                        "[telegram] user_id %s not in cache, iterating group participants...",
                         user_id,
                     )
-                    group = await self.client.get_entity(group_invite)
-                    async for p in self.client.iter_participants(group):
+                    count = 0
+                    async for p in self.client.iter_participants(
+                        group, aggressive=True
+                    ):
+                        count += 1
                         if getattr(p, "id", None) == user_id:
                             logger.info(
-                                "[telegram] found user_id %s in group, sending",
+                                "[telegram] found user_id %s in group after %s participants",
                                 user_id,
+                                count,
                             )
                             return p
+                    logger.warning(
+                        "[telegram] user_id %s not found in group after %s participants",
+                        user_id,
+                        count,
+                    )
                 except Exception as e:
-                    logger.debug(
+                    logger.warning(
                         "[telegram] group fallback for user_id %s failed: %s",
                         user_id,
                         e,
