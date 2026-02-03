@@ -95,6 +95,7 @@ Update your webhook URLs in Chatwoot, Wasender, and VK to point to your public n
 - **Outgoing:** Messages from Chatwoot are sent to WhatsApp, Telegram, or VK via their respective adapters.
 - **Incoming:** Replies from users in messengers are delivered to Chatwoot with all attributes preserved.
 - Contacts are matched or created based on messenger IDs (e.g., `telegram_user_id`, `telegram_username`).
+- **Webhook por conta:** O webhook do Chatwoot (Settings → Applications → Webhooks) é por conta, portanto recebe eventos de todas as caixas. O gateway filtra por **inbox_id** (TG_INBOX_ID, WASENDER_INBOX_ID, VK_INBOX_ID) e só processa eventos da caixa configurada para cada canal, evitando conflito entre caixas.
 
 ### 6. Development
 

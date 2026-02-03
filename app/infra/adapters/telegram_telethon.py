@@ -292,10 +292,14 @@ class TelegramAdapter(MessengerAdapter):
         recipient_id: str,
         content: TextContent,
         access_hash: Optional[int] = None,
+        *,
+        mark_as_gateway_send: bool = True,
     ) -> None:
         """
         Send a simple text message, resolving the recipient first.
         access_hash: opcional; permite enviar por user_id sem o user ter iniciado conversa.
+        mark_as_gateway_send: se True (envio pelo webhook Chatwoot), evita duplicar no Chatwoot;
+            se False (envio pelo /dispatch), o handler telegram.outgoing cria a msg no Chatwoot.
         Raises on failure so callers (e.g. /dispatch) can return error to the client.
         """
         if not self.client or not self.client.is_connected():
@@ -307,13 +311,14 @@ class TelegramAdapter(MessengerAdapter):
 
         try:
             await self.client.send_message(entity, content.text)
-            # Marcar envio pelo gateway para o handler telegram.outgoing não duplicar no Chatwoot
-            resolved_id = getattr(entity, "user_id", None) or getattr(entity, "id", None)
-            if resolved_id is not None and self.bus:
-                self.bus.emit(
-                    "telegram.sent_by_gateway",
-                    {"to_id": str(resolved_id), "text": content.text},
-                )
+            # Só marcar como "enviado pelo gateway" quando for webhook Chatwoot (não /dispatch)
+            if mark_as_gateway_send:
+                resolved_id = getattr(entity, "user_id", None) or getattr(entity, "id", None)
+                if resolved_id is not None and self.bus:
+                    self.bus.emit(
+                        "telegram.sent_by_gateway",
+                        {"to_id": str(resolved_id), "text": content.text},
+                    )
             logger.info("[telegram] SENT: %s -> %s", recipient_id, content.text)
         except ValueError as e:
             if "Cannot find any entity" in str(e) or "corresponding to" in str(e):

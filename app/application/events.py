@@ -382,6 +382,19 @@ def wire_events(
                 source_id=contact["source_id"],
             )
 
+            # Evitar duplicar quando chegam dois eventos (ex.: emit manual do /dispatch + evento Telethon)
+            now = time.monotonic()
+            for (cid, txt, ts) in recent_created_outgoing:
+                if now - ts > CREATED_OUTGOING_TTL_SEC:
+                    continue
+                if cid == conv_id and txt == (text or ""):
+                    logger.debug(
+                        "[events] telegram.outgoing já criado: conv_id=%s text=%r",
+                        conv_id,
+                        (text or "")[:50],
+                    )
+                    return
+
             attachment_path = payload.get("attachment_path")
             attachment_content_type = payload.get("attachment_content_type")
             try:

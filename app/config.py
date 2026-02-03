@@ -35,6 +35,8 @@ class ChatwootWebhookConfig(BaseModel):
     base_url: HttpUrl
     # Map webhook id -> channel name
     channel_by_webhook_id: Dict[str, str] = Field(default_factory=dict)
+    # Map channel name -> inbox_id (para filtrar webhooks por caixa de entrada)
+    inbox_id_by_channel: Dict[str, int] = Field(default_factory=dict)
 
 
 class AppConfig(BaseModel):
@@ -119,6 +121,15 @@ def load_config() -> AppConfig:
 
         dispatch_token = (os.getenv("DISPATCH_API_TOKEN") or "").strip() or None
 
+        # Mapa canal -> inbox_id para filtrar webhooks por caixa (evitar conflito entre caixas)
+        inbox_by_channel: Dict[str, int] = {}
+        if telegram_cfg:
+            inbox_by_channel["telegram"] = telegram_cfg.inbox_id
+        if wasender_cfg:
+            inbox_by_channel["whatsapp"] = wasender_cfg.inbox_id
+        if vk_cfg:
+            inbox_by_channel["vk"] = vk_cfg.inbox_id
+
         return AppConfig(
             telegram=telegram_cfg,
             wasender=wasender_cfg,
@@ -128,6 +139,7 @@ def load_config() -> AppConfig:
                 account_id=int(_getenv("CHATWOOT_ACCOUNT_ID")),
                 base_url=_getenv("CHATWOOT_BASE_URL"),
                 channel_by_webhook_id=_build_channel_map(),
+                inbox_id_by_channel=inbox_by_channel,
             ),
             dispatch_api_token=dispatch_token,
         )

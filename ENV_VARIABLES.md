@@ -122,6 +122,8 @@ Isso gerará um ID hexadecimal seguro de 64 caracteres que você pode usar como 
 - Esse ID é usado pelo sistema para identificar qual canal (telegram) está recebendo os eventos do Chatwoot
 - Use um ID único e seguro para evitar conflitos
 
+**Webhook por conta vs. por caixa:** No Chatwoot o webhook é configurado em **Settings → Applications → Webhooks** (nível da conta), portanto **todos** os eventos da conta (todas as caixas) são enviados para a mesma URL. Para evitar conflito entre caixas (ex.: Telegram, WhatsApp, VK na mesma conta), o gateway **filtra por inbox**: só processa eventos cuja conversa pertence ao inbox configurado para cada canal (`TG_INBOX_ID`, `WASENDER_INBOX_ID`, `VK_INBOX_ID`). Pode usar uma única URL de webhook para todos os canais ou uma URL por canal (IDs diferentes); em ambos os casos o filtro por inbox garante que cada evento seja tratado apenas pelo canal da caixa correta.
+
 ### VK (VKontakte)
 
 Para habilitar o VK, configure todas estas variáveis:

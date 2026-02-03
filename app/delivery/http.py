@@ -138,8 +138,25 @@ def create_router(
         event = payload.get("event")
         msg_type = payload.get("message_type")
 
-        # Ensure conversation/meta exists and inject channel if detected
+        # Filtrar por caixa de entrada: o webhook é por conta (Applications → Webhooks),
+        # então recebemos eventos de todas as caixas; processar só os da caixa deste canal.
         conv = payload.setdefault("conversation", {})
+        payload_inbox_raw = conv.get("inbox_id") or (conv.get("inbox") or {}).get("id")
+        expected_inbox = config.chatwoot.inbox_id_by_channel.get(channel)
+        if expected_inbox is not None and payload_inbox_raw is not None:
+            try:
+                payload_inbox = int(payload_inbox_raw)
+                if payload_inbox != expected_inbox:
+                    logger.info(
+                        "[chatwoot] Event ignored: inbox_id=%s does not match channel %s (expected inbox=%s)",
+                        payload_inbox,
+                        channel,
+                        expected_inbox,
+                    )
+                    return {"status": "received"}
+            except (TypeError, ValueError):
+                pass
+
         meta = conv.setdefault("meta", {})
         if channel:
             # Inject resolved channel so downstream router can dispatch

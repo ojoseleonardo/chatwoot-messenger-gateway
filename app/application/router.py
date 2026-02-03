@@ -259,10 +259,12 @@ class MessageRouter:
                     logger.warning("[router] set_typing falhou (ignorado): %s", e)
 
         try:
+            # mark_as_gateway_send=False para o handler telegram.outgoing criar a msg no Chatwoot
             await adapter.send_text(
                 recipient_id,
                 TextContent(type="text", text=text),
                 access_hash=access_hash,
+                mark_as_gateway_send=False,
             )
         except (ValueError, RuntimeError):
             raise
@@ -274,7 +276,8 @@ class MessageRouter:
             recipient_id,
             text[:80] + "..." if len(text) > 80 else text,
         )
-        # Sincronizar com Chatwoot: o evento NewMessage(outgoing) do Telethon pode não disparar a tempo
+        # Garantir que a mensagem aparece no Chatwoot: emitir para o handler criar
+        # (o evento Telethon pode chegar depois; o handler ignora duplicados por conv_id+text)
         if self._bus:
             to_id = (recipient_id or "").strip()
             if to_id.startswith("id:"):
