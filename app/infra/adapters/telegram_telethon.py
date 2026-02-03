@@ -78,6 +78,12 @@ class TelegramAdapter(MessengerAdapter):
         # Register handler for incoming messages (non-bot account)
         @self.client.on(events.NewMessage(incoming=True))
         async def handle_incoming(event):
+            # Ignorar mensagens de grupos/canais; só encaminhar conversas privadas (1:1)
+            peer = getattr(event, "peer_id", None) or getattr(
+                getattr(event, "message", None), "peer_id", None
+            )
+            if peer is None or not isinstance(peer, types.PeerUser):
+                return
             # Extract sender details
             sender = await event.get_sender()
             username = getattr(sender, "username", None)
