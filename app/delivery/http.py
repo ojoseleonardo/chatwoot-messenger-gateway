@@ -66,6 +66,14 @@ def create_router(
         telegram_enabled = bool(getattr(config, "telegram", None))
         vk_enabled = bool(getattr(config, "vk", None))
 
+        # Obter status detalhado do Telegram (se configurado)
+        telegram_status = None
+        if telegram_enabled and message_router and "telegram" in message_router.adapters:
+            tg_adapter = message_router.adapters["telegram"]
+            get_status = getattr(tg_adapter, "get_status", None)
+            if callable(get_status):
+                telegram_status = get_status()
+
         return {
             "ok": True,
             "chatwoot": {
@@ -83,6 +91,7 @@ def create_router(
                 "session_name": (
                     config.telegram.session_name if telegram_enabled else None
                 ),
+                "status": telegram_status,
             },
             "vk": {
                 "enabled": vk_enabled,

@@ -32,6 +32,16 @@ class TelegramAdapter(MessengerAdapter):
         self.inbox_id = config.inbox_id  # expose per-channel inbox
         self.client: Optional[TelegramClient] = None
         self._cb: Optional[OnMessage] = None
+        # Cache de participantes do grupo (prefetch): user_id -> User object
+        self._participants_cache: dict[int, object] = {}
+        # Cache adicional: username (lowercase, sem @) -> User object
+        self._username_cache: dict[str, object] = {}
+        # Flag: prefetch em andamento
+        self._prefetch_in_progress = False
+        # Flag: prefetch completado (adapter pronto para envio por user_id)
+        self._prefetch_done = False
+        # Event para aguardar prefetch terminar
+        self._prefetch_event: Optional[asyncio.Event] = None
 
     def on_message(self, cb: OnMessage) -> None:
         self._cb = cb
@@ -209,10 +219,15 @@ class TelegramAdapter(MessengerAdapter):
             logger.info(
                 "[telegram] TG_GROUP_INVITE not set — skipping group participant prefetch"
             )
+            # Sem grupo configurado, marcar como "pronto" (não vai conseguir resolver user_ids desconhecidos)
+            self._prefetch_done = True
         if group_invite:
             logger.info(
                 "[telegram] TG_GROUP_INVITE set — starting group participant prefetch in background"
             )
+            self._prefetch_event = asyncio.Event()
+            self._prefetch_in_progress = True
+
             async def _prefetch_group():
                 try:
                     logger.info(
@@ -220,24 +235,41 @@ class TelegramAdapter(MessengerAdapter):
                     )
                     group = await self.client.get_entity(group_invite)
                     n = 0
-                    async for _ in self.client.iter_participants(group):
+                    async for participant in self.client.iter_participants(group):
                         n += 1
+                        # Guardar no cache interno para lookup rápido
+                        pid = getattr(participant, "id", None)
+                        if pid is not None:
+                            self._participants_cache[pid] = participant
+                        # Guardar também por username (se tiver)
+                        uname = getattr(participant, "username", None)
+                        if uname:
+                            self._username_cache[uname.lower()] = participant
                         if n % 2000 == 0:
                             logger.info(
-                                "[telegram] prefetch progress: %s participants",
+                                "[telegram] prefetch progress: %s participants (id_cache: %s, username_cache: %s)",
                                 n,
+                                len(self._participants_cache),
+                                len(self._username_cache),
                             )
                         if n >= 15000:
                             break
                     logger.info(
-                        "[telegram] prefetched %s participants from group (TG_GROUP_INVITE) — done",
+                        "[telegram] prefetched %s participants from group (TG_GROUP_INVITE) — done (id_cache: %s, username_cache: %s)",
                         n,
+                        len(self._participants_cache),
+                        len(self._username_cache),
                     )
                 except Exception as e:
                     logger.warning(
                         "[telegram] TG_GROUP_INVITE prefetch failed: %s",
                         e,
                     )
+                finally:
+                    self._prefetch_in_progress = False
+                    self._prefetch_done = True
+                    if self._prefetch_event:
+                        self._prefetch_event.set()
 
             asyncio.create_task(_prefetch_group())
 
@@ -248,7 +280,18 @@ class TelegramAdapter(MessengerAdapter):
             await self.client.disconnect()
         logger.info("[telegram] adapter stopped")
 
-    async def _resolve_entity(self, raw: str):
+    def get_status(self) -> dict:
+        """Retorna estado do adapter para diagnóstico (usado no /health)."""
+        return {
+            "connected": self.client.is_connected() if self.client else False,
+            "prefetch_in_progress": self._prefetch_in_progress,
+            "prefetch_done": self._prefetch_done,
+            "id_cache_size": len(self._participants_cache),
+            "username_cache_size": len(self._username_cache),
+            "ready_for_dispatch": self._prefetch_done and (self.client.is_connected() if self.client else False),
+        }
+
+    async def _resolve_entity(self, raw: str, wait_for_prefetch: bool = True):
         """
         Resolve Telethon 'entity' from a recipient string.
         Supported formats:
@@ -258,7 +301,7 @@ class TelegramAdapter(MessengerAdapter):
         Notes:
           - Sending by phone requires importing the phone into your contacts first.
           - Sending by user_id works only if the session already knows this user
-            (i.e., has access_hash cached from previous interactions).
+            (i.e., has access_hash cached from previous interactions or from prefetch).
         """
         rid = (raw or "").strip()
         if not rid:
@@ -266,6 +309,26 @@ class TelegramAdapter(MessengerAdapter):
 
         # Username: Telethon accepts both with and without leading '@'
         if USERNAME_RE.match(rid):
+            uname = rid.lstrip("@").lower()
+            # Verificar cache de usernames primeiro (preenchido pelo prefetch)
+            if uname in self._username_cache:
+                logger.info("[telegram] found @%s in username cache", uname)
+                return self._username_cache[uname]
+            # Se prefetch ainda está a decorrer, aguardar
+            if self._prefetch_in_progress and self._prefetch_event:
+                logger.info(
+                    "[telegram] @%s not in cache yet, waiting for prefetch to complete (max 60s)...",
+                    uname,
+                )
+                try:
+                    await asyncio.wait_for(self._prefetch_event.wait(), timeout=60.0)
+                except asyncio.TimeoutError:
+                    logger.warning("[telegram] prefetch timeout (60s), continuing")
+                # Verificar novamente após prefetch
+                if uname in self._username_cache:
+                    logger.info("[telegram] found @%s in username cache (after waiting)", uname)
+                    return self._username_cache[uname]
+            # Fallback: deixar Telethon resolver via API (funciona para qualquer username público)
             return rid.lstrip("@")
 
         # Phone number: import to contacts first, then you can send by the number
@@ -285,42 +348,59 @@ class TelegramAdapter(MessengerAdapter):
         if rid.startswith("id:"):
             rid = rid[3:].strip()
 
-        # Bare integer: try to resolve as user_id (works only if known to the session)
+        # Bare integer: try to resolve as user_id
         if rid.isdigit():
             user_id = int(rid)
+
+            # 1) Verificar cache interno primeiro (preenchido pelo prefetch)
+            if user_id in self._participants_cache:
+                logger.info(
+                    "[telegram] found user_id %s in prefetch cache",
+                    user_id,
+                )
+                return self._participants_cache[user_id]
+
+            # 2) Se prefetch ainda está a decorrer, aguardar até 60s
+            if self._prefetch_in_progress and wait_for_prefetch and self._prefetch_event:
+                logger.info(
+                    "[telegram] user_id %s not in cache yet, waiting for prefetch to complete (max 60s)...",
+                    user_id,
+                )
+                try:
+                    await asyncio.wait_for(self._prefetch_event.wait(), timeout=60.0)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[telegram] prefetch timeout (60s), continuing without full cache"
+                    )
+
+                # Verificar cache novamente após prefetch
+                if user_id in self._participants_cache:
+                    logger.info(
+                        "[telegram] found user_id %s in prefetch cache (after waiting)",
+                        user_id,
+                    )
+                    return self._participants_cache[user_id]
+
+            # 3) Tentar get_entity (funciona se a sessão Telethon já conhece o user)
             try:
-                return await self.client.get_entity(user_id)
+                entity = await self.client.get_entity(user_id)
+                # Guardar no cache para futuras consultas
+                self._participants_cache[user_id] = entity
+                return entity
             except (ValueError, errors.rpcerrorlist.PeerIdInvalidError):
-                pass
-            # Fallback: grupo (TG_GROUP_INVITE) — estratégias da API Telegram/Telethon
+                logger.warning(
+                    "[telegram] get_entity(%s) failed, trying group fallback",
+                    user_id,
+                )
+
+            # 4) Fallback: grupo (TG_GROUP_INVITE)
             group_invite = (os.getenv("TG_GROUP_INVITE") or "").strip()
             if group_invite:
                 try:
                     group = await self.client.get_entity(group_invite)
-                    # 1) Tentar GetParticipant (um único request) — funciona se tivermos acesso
-                    try:
-                        result = await self.client(
-                            functions.channels.GetParticipantRequest(
-                                channel=group,
-                                participant=types.InputPeerUser(user_id, 0),
-                            )
-                        )
-                        # Resposta traz users[]; pegar o User com esse id
-                        for u in getattr(result, "users", []) or []:
-                            if getattr(u, "id", None) == user_id:
-                                logger.info(
-                                    "[telegram] found user_id %s via GetParticipant",
-                                    user_id,
-                                )
-                                return u
-                    except (
-                        errors.rpcerrorlist.UserIdInvalidError,
-                        errors.rpcerrorlist.UserNotParticipantError,
-                    ):
-                        pass
-                    # 2) Iterar participantes (aggressive=True para mais membros)
+                    # Iterar participantes (aggressive=True para mais membros)
                     logger.info(
-                        "[telegram] user_id %s not in cache, iterating group participants...",
+                        "[telegram] user_id %s not in cache/session, iterating group participants...",
                         user_id,
                     )
                     count = 0
@@ -328,7 +408,15 @@ class TelegramAdapter(MessengerAdapter):
                         group, aggressive=True
                     ):
                         count += 1
-                        if getattr(p, "id", None) == user_id:
+                        pid = getattr(p, "id", None)
+                        # Guardar no cache enquanto iteramos
+                        if pid is not None:
+                            self._participants_cache[pid] = p
+                        # Guardar também por username
+                        puname = getattr(p, "username", None)
+                        if puname:
+                            self._username_cache[puname.lower()] = p
+                        if pid == user_id:
                             logger.info(
                                 "[telegram] found user_id %s in group after %s participants",
                                 user_id,
@@ -346,10 +434,23 @@ class TelegramAdapter(MessengerAdapter):
                         user_id,
                         e,
                     )
+
+            # Mensagem de erro mais clara
+            group_status = "configurado" if (os.getenv("TG_GROUP_INVITE") or "").strip() else "NÃO configurado"
+            prefetch_status = "completado" if self._prefetch_done else "em andamento" if self._prefetch_in_progress else "não iniciado"
+            cache_size = len(self._participants_cache)
+
+            logger.warning(
+                "[telegram] cannot resolve recipient_id=%s (TG_GROUP_INVITE=%s, prefetch=%s, cache_size=%s)",
+                rid,
+                group_status,
+                prefetch_status,
+                cache_size,
+            )
             raise RuntimeError(
-                "Destinatário '%s' não encontrado. O utilizador precisa ter iniciado "
-                "conversa com esta conta (Telegram) antes."
-                % rid
+                f"Destinatário '{rid}' não encontrado. "
+                f"O utilizador não está no grupo configurado ou precisa ter iniciado conversa com esta conta (Telegram) antes. "
+                f"(prefetch: {prefetch_status}, cache: {cache_size} utilizadores)"
             )
 
         # Anything else is not supported
