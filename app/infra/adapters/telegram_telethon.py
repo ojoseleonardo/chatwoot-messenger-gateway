@@ -249,10 +249,12 @@ class TelegramAdapter(MessengerAdapter):
                     continue
                 # Marcar como retornado
                 self._members_returned.add(pid)
-                # Construir resposta
+                # Construir resposta (user_id e access_hash como string para evitar
+                # perda de precisão em JSON/JavaScript com números de 64 bits)
+                access_hash_raw = getattr(participant, "access_hash", None)
                 return {
-                    "user_id": pid,
-                    "access_hash": getattr(participant, "access_hash", None),
+                    "user_id": str(pid),
+                    "access_hash": str(access_hash_raw) if access_hash_raw is not None else None,
                     "username": getattr(participant, "username", None),
                     "first_name": getattr(participant, "first_name", None),
                     "last_name": getattr(participant, "last_name", None),

@@ -329,6 +329,12 @@ def create_router(
             Autenticação: header Authorization: Bearer <DISPATCH_API_TOKEN>.
             """
             _check_dispatch_token(authorization)
+            logger.info(
+                "[dispatch] recipient_id=%r access_hash=%r (type=%s)",
+                body.recipient_id,
+                body.access_hash,
+                type(body.access_hash).__name__,
+            )
             try:
                 await message_router.dispatch_direct(
                     channel="telegram",
