@@ -2,9 +2,10 @@ import asyncio
 import base64
 import logging
 import os
+import random
 import re
 import tempfile
-from typing import Optional, Union
+from typing import Optional, Tuple, Union
 
 from pyee.asyncio import AsyncIOEventEmitter
 from telethon import TelegramClient, errors, events, functions, types
@@ -16,6 +17,43 @@ from app.domain.message import MediaContent, TextContent
 from app.domain.ports import MessengerAdapter, OnMessage
 
 logger = logging.getLogger(__name__)
+
+# Configurações de typing para simular digitação humana
+TYPING_CHARS_PER_SECOND = 10  # ~60 palavras/min (digitador médio)
+TYPING_VARIATION_PERCENT = 0.15  # ±15% variação aleatória
+
+
+def calculate_typing_delay(text: str) -> Tuple[float, int, int]:
+    """
+    Calcula o tempo de digitação baseado no número de caracteres.
+    
+    Velocidade de digitação ajustada para ser mais realista:
+    - Digitadores médios: 40-60 palavras por minuto (200-300 caracteres/minuto)
+    - Digitadores rápidos: 60-80 palavras por minuto (300-400 caracteres/minuto)
+    - Usamos ~10 caracteres por segundo (60 palavras/min aproximadamente)
+    
+    Returns:
+        Tuple[float, int, int]: (total_seconds, seconds, milliseconds)
+    """
+    char_count = len(text) if text else 0
+    if char_count == 0:
+        return (0.0, 0, 0)
+    
+    # Calcula o tempo base em segundos
+    base_seconds = char_count / TYPING_CHARS_PER_SECOND
+    
+    # Adiciona uma variação aleatória de ±15% para parecer mais humano
+    variation = (random.random() * 2 * TYPING_VARIATION_PERCENT) - TYPING_VARIATION_PERCENT
+    total_seconds = base_seconds * (1 + variation)
+    
+    # Mínimo de 0.5s para mensagens muito curtas, máximo de 8s para não parecer robô
+    total_seconds = max(0.5, min(total_seconds, 8.0))
+    
+    # Separa segundos e milissegundos
+    seconds = int(total_seconds)
+    milliseconds = int((total_seconds - seconds) * 1000)
+    
+    return (total_seconds, seconds, milliseconds)
 
 # Accept @username or plain username (min length 5)
 USERNAME_RE = re.compile(r"^@?[A-Za-z0-9_]{5,}$")
@@ -370,12 +408,15 @@ class TelegramAdapter(MessengerAdapter):
         access_hash: Optional[int] = None,
         *,
         mark_as_gateway_send: bool = True,
+        simulate_typing: bool = True,
     ) -> None:
         """
         Send a simple text message, resolving the recipient first.
         access_hash: opcional; permite enviar por user_id sem o user ter iniciado conversa.
         mark_as_gateway_send: se True (envio pelo webhook Chatwoot), evita duplicar no Chatwoot;
             se False (envio pelo /dispatch), o handler telegram.outgoing cria a msg no Chatwoot.
+        simulate_typing: se True (padrão), mostra indicador de digitação antes de enviar,
+            com duração baseada no número de caracteres da mensagem.
         Raises on failure so callers (e.g. /dispatch) can return error to the client.
         """
         if not self.client or not self.client.is_connected():
@@ -386,6 +427,19 @@ class TelegramAdapter(MessengerAdapter):
             entity = await self._resolve_entity(recipient_id)
 
         try:
+            # Simular typing baseado no número de caracteres (parecer mais humano)
+            if simulate_typing and content.text:
+                total_seconds, seconds, milliseconds = calculate_typing_delay(content.text)
+                if total_seconds > 0:
+                    logger.debug(
+                        "[telegram] typing for %.2fs (%d chars) before sending to %s",
+                        total_seconds,
+                        len(content.text),
+                        recipient_id,
+                    )
+                    await self.set_typing(recipient_id, typing=True, access_hash=access_hash)
+                    await asyncio.sleep(total_seconds)
+
             await self.client.send_message(entity, content.text)
             # Só marcar como "enviado pelo gateway" quando for webhook Chatwoot (não /dispatch)
             if mark_as_gateway_send:
@@ -416,11 +470,16 @@ class TelegramAdapter(MessengerAdapter):
             raise
 
     async def send_media(
-        self, recipient_id: str, content: MediaContent
+        self,
+        recipient_id: str,
+        content: MediaContent,
+        *,
+        simulate_typing: bool = True,
     ) -> None:
         """
         Download media from URL and send to Telegram (voice/audio).
         Used when Chatwoot envia áudio para o contacto.
+        simulate_typing: se True (padrão), mostra indicador de "gravando áudio" antes de enviar.
         """
         if not self.client or not self.client.is_connected():
             logger.warning("[telegram] client is not connected; skipping send_media")
@@ -435,6 +494,21 @@ class TelegramAdapter(MessengerAdapter):
         path: Optional[str] = None
         try:
             entity = await self._resolve_entity(recipient_id)
+
+            # Simular "gravando áudio" antes de enviar mídia (parecer mais humano)
+            if simulate_typing:
+                # Tempo fixo de 1-2s para mídia (variação aleatória)
+                typing_delay = 1.0 + random.random()
+                logger.debug(
+                    "[telegram] typing (record_audio) for %.2fs before sending media to %s",
+                    typing_delay,
+                    recipient_id,
+                )
+                # Usar "record-audio" para áudio, "typing" para outros tipos
+                action = "record-audio" if content.media_type == "audio" else "typing"
+                await self.client.action(entity, action)
+                await asyncio.sleep(typing_delay)
+
             # Chatwoot Active Storage devolve 302; é preciso seguir o redirect
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 r = await client.get(url)
