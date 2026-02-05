@@ -396,8 +396,18 @@ class TelegramAdapter(MessengerAdapter):
             )
             if entity is None:
                 entity = await self._resolve_entity(recipient_id)
-            action = "typing" if typing else "cancel"
-            await self.client.action(entity, action)
+            # Usar API de baixo nível SetTypingRequest
+            action = (
+                types.SendMessageTypingAction()
+                if typing
+                else types.SendMessageCancelAction()
+            )
+            await self.client(
+                functions.messages.SetTypingRequest(
+                    peer=entity,
+                    action=action,
+                )
+            )
         except Exception as e:
             logger.debug("[telegram] set_typing failed: %s", e)
 
@@ -431,15 +441,23 @@ class TelegramAdapter(MessengerAdapter):
             if simulate_typing and content.text:
                 total_seconds, seconds, milliseconds = calculate_typing_delay(content.text)
                 if total_seconds > 0:
-                    logger.debug(
+                    logger.info(
                         "[telegram] typing for %.2fs (%d chars) before sending to %s",
                         total_seconds,
                         len(content.text),
                         recipient_id,
                     )
-                    # Usar context manager para manter o typing ativo durante todo o delay
-                    async with self.client.action(entity, "typing"):
+                    # Usar API de baixo nível SetTypingRequest para garantir que funciona
+                    try:
+                        await self.client(
+                            functions.messages.SetTypingRequest(
+                                peer=entity,
+                                action=types.SendMessageTypingAction(),
+                            )
+                        )
                         await asyncio.sleep(total_seconds)
+                    except Exception as typing_err:
+                        logger.warning("[telegram] typing failed (continuing): %s", typing_err)
 
             await self.client.send_message(entity, content.text)
             # Só marcar como "enviado pelo gateway" quando for webhook Chatwoot (não /dispatch)
@@ -500,16 +518,28 @@ class TelegramAdapter(MessengerAdapter):
             if simulate_typing:
                 # Tempo fixo de 1-2s para mídia (variação aleatória)
                 typing_delay = 1.0 + random.random()
-                logger.debug(
+                logger.info(
                     "[telegram] typing (record_audio) for %.2fs before sending media to %s",
                     typing_delay,
                     recipient_id,
                 )
-                # Usar "record-audio" para áudio, "typing" para outros tipos
-                action = "record-audio" if content.media_type == "audio" else "typing"
-                # Usar context manager para manter a ação ativa durante todo o delay
-                async with self.client.action(entity, action):
+                # Usar API de baixo nível SetTypingRequest
+                try:
+                    # Usar SendMessageRecordAudioAction para áudio, SendMessageTypingAction para outros
+                    action = (
+                        types.SendMessageRecordAudioAction()
+                        if content.media_type == "audio"
+                        else types.SendMessageTypingAction()
+                    )
+                    await self.client(
+                        functions.messages.SetTypingRequest(
+                            peer=entity,
+                            action=action,
+                        )
+                    )
                     await asyncio.sleep(typing_delay)
+                except Exception as typing_err:
+                    logger.warning("[telegram] typing failed (continuing): %s", typing_err)
 
             # Chatwoot Active Storage devolve 302; é preciso seguir o redirect
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
