@@ -412,6 +412,29 @@ class TelegramAdapter(MessengerAdapter):
         except Exception as e:
             logger.debug("[telegram] set_typing failed: %s", e)
 
+    async def _mark_as_read(self, entity: Union[types.InputPeerUser, object]) -> None:
+        """
+        Marca a conversa como lida (envia "lido" / read receipt) para o destinatário.
+        Só utilizadores (não bots) podem usar. Falhas são ignoradas.
+        """
+        if not self.client or not self.client.is_connected():
+            return
+        try:
+            # Obter a última mensagem no chat para usar como max_id
+            last = await self.client.get_messages(entity, limit=1)
+            max_id = last[0].id if last else 0
+            if max_id <= 0:
+                return
+            await self.client(
+                functions.messages.ReadHistoryRequest(
+                    peer=entity,
+                    max_id=max_id,
+                )
+            )
+            logger.debug("[telegram] marked as read (max_id=%s)", max_id)
+        except Exception as e:
+            logger.debug("[telegram] mark as read failed: %s", e)
+
     async def send_text(
         self,
         recipient_id: str,
@@ -438,6 +461,9 @@ class TelegramAdapter(MessengerAdapter):
             entity = await self._resolve_entity(recipient_id)
 
         try:
+            # Marcar como lido antes do typing (o destinatário vê o "lido")
+            await self._mark_as_read(entity)
+
             # Simular typing baseado no número de caracteres (parecer mais humano)
             if simulate_typing and content.text:
                 total_seconds, seconds, milliseconds = calculate_typing_delay(content.text)
@@ -448,15 +474,20 @@ class TelegramAdapter(MessengerAdapter):
                         len(content.text),
                         recipient_id,
                     )
-                    # Usar API de baixo nível SetTypingRequest para garantir que funciona
+                    # Telegram cancela o typing após ~5s se não for reenviado.
+                    # Reenviar a cada 4s para manter o indicador visível durante todo o tempo.
                     try:
-                        await self.client(
-                            functions.messages.SetTypingRequest(
-                                peer=entity,
-                                action=types.SendMessageTypingAction(),
+                        elapsed = 0.0
+                        while elapsed < total_seconds:
+                            await self.client(
+                                functions.messages.SetTypingRequest(
+                                    peer=entity,
+                                    action=types.SendMessageTypingAction(),
+                                )
                             )
-                        )
-                        await asyncio.sleep(total_seconds)
+                            chunk = min(4.0, total_seconds - elapsed)
+                            await asyncio.sleep(chunk)
+                            elapsed += chunk
                     except Exception as typing_err:
                         logger.warning("[telegram] typing failed (continuing): %s", typing_err)
 
@@ -514,6 +545,9 @@ class TelegramAdapter(MessengerAdapter):
         path: Optional[str] = None
         try:
             entity = await self._resolve_entity(recipient_id)
+
+            # Marcar como lido antes do gravando áudio (o destinatário vê o "lido")
+            await self._mark_as_read(entity)
 
             # Simular "gravando áudio" antes de enviar mídia (parecer mais humano)
             if simulate_typing:
