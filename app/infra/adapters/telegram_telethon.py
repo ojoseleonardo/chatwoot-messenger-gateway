@@ -437,8 +437,9 @@ class TelegramAdapter(MessengerAdapter):
                         len(content.text),
                         recipient_id,
                     )
-                    await self.set_typing(recipient_id, typing=True, access_hash=access_hash)
-                    await asyncio.sleep(total_seconds)
+                    # Usar context manager para manter o typing ativo durante todo o delay
+                    async with self.client.action(entity, "typing"):
+                        await asyncio.sleep(total_seconds)
 
             await self.client.send_message(entity, content.text)
             # Só marcar como "enviado pelo gateway" quando for webhook Chatwoot (não /dispatch)
@@ -506,8 +507,9 @@ class TelegramAdapter(MessengerAdapter):
                 )
                 # Usar "record-audio" para áudio, "typing" para outros tipos
                 action = "record-audio" if content.media_type == "audio" else "typing"
-                await self.client.action(entity, action)
-                await asyncio.sleep(typing_delay)
+                # Usar context manager para manter a ação ativa durante todo o delay
+                async with self.client.action(entity, action):
+                    await asyncio.sleep(typing_delay)
 
             # Chatwoot Active Storage devolve 302; é preciso seguir o redirect
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
