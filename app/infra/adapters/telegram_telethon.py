@@ -19,7 +19,10 @@ from app.domain.ports import MessengerAdapter, OnMessage
 logger = logging.getLogger(__name__)
 
 # Configurações de typing para simular digitação humana
-TYPING_CHARS_PER_SECOND = 10  # ~60 palavras/min (digitador médio)
+# Digitadores médios: 40-60 palavras por minuto (200-300 caracteres/minuto)
+# Digitadores rápidos: 60-80 palavras por minuto (300-400 caracteres/minuto)
+# Usamos ~10 caracteres por segundo (60 palavras/min aproximadamente)
+TYPING_CHARS_PER_SECOND = 10
 TYPING_VARIATION_PERCENT = 0.15  # ±15% variação aleatória
 
 
@@ -27,10 +30,10 @@ def calculate_typing_delay(text: str) -> Tuple[float, int, int]:
     """
     Calcula o tempo de digitação baseado no número de caracteres.
     
-    Velocidade de digitação ajustada para ser mais realista:
-    - Digitadores médios: 40-60 palavras por minuto (200-300 caracteres/minuto)
-    - Digitadores rápidos: 60-80 palavras por minuto (300-400 caracteres/minuto)
-    - Usamos ~10 caracteres por segundo (60 palavras/min aproximadamente)
+    Segue a mesma lógica usada no WhatsApp:
+    - ~10 caracteres por segundo (60 palavras/min)
+    - Variação aleatória de ±15% para parecer mais humano
+    - Sem limite máximo (mensagens grandes = tempo maior)
     
     Returns:
         Tuple[float, int, int]: (total_seconds, seconds, milliseconds)
@@ -39,19 +42,17 @@ def calculate_typing_delay(text: str) -> Tuple[float, int, int]:
     if char_count == 0:
         return (0.0, 0, 0)
     
-    # Calcula o tempo base em segundos
+    # Calcula o tempo base em segundos (charCount / charsPerSecond)
     base_seconds = char_count / TYPING_CHARS_PER_SECOND
     
     # Adiciona uma variação aleatória de ±15% para parecer mais humano
-    variation = (random.random() * 2 * TYPING_VARIATION_PERCENT) - TYPING_VARIATION_PERCENT
+    # variation = (Math.random() * 0.3) - 0.15 => -0.15 a +0.15
+    variation = (random.random() * 0.3) - 0.15
     total_seconds = base_seconds * (1 + variation)
-    
-    # Mínimo de 0.5s para mensagens muito curtas, máximo de 8s para não parecer robô
-    total_seconds = max(0.5, min(total_seconds, 8.0))
     
     # Separa segundos e milissegundos
     seconds = int(total_seconds)
-    milliseconds = int((total_seconds - seconds) * 1000)
+    milliseconds = round((total_seconds - seconds) * 1000)
     
     return (total_seconds, seconds, milliseconds)
 
