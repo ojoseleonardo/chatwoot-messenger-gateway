@@ -25,6 +25,45 @@ logger = logging.getLogger(__name__)
 TYPING_CHARS_PER_SECOND = 10
 TYPING_VARIATION_PERCENT = 0.15  # ±15% variação aleatória
 
+# Configurações de "gravando áudio": +4s preparação; ±5% variação (mesma lógica do WhatsApp)
+RECORD_AUDIO_EXTRA_SECONDS = 4
+RECORD_AUDIO_VARIATION_PERCENT = 0.05  # ±5%
+# Fallback por transcrição: ~19 caracteres/s (velocidade de fala ElevenLabs)
+RECORD_AUDIO_CHARS_PER_SECOND = 19
+
+
+def get_audio_duration_seconds(file_path: str) -> Optional[float]:
+    """
+    Obtém a duração real do áudio em segundos a partir do ficheiro (ogg, m4a, mp3).
+    Usa mutagen para ler metadados. Retorna None se não conseguir.
+    """
+    try:
+        from mutagen import File as MutagenFile
+
+        audio = MutagenFile(file_path)
+        if audio is not None and hasattr(audio, "info") and hasattr(audio.info, "length"):
+            return float(audio.info.length)
+    except Exception:  # mutagen não instalado, formato não suportado, ficheiro inválido
+        pass
+    return None
+
+
+def record_audio_delay_from_duration(duration_seconds: float) -> float:
+    """Duração do indicador 'gravando': duração real + 4s preparação, com ±5% variação."""
+    base = duration_seconds + RECORD_AUDIO_EXTRA_SECONDS
+    variation = (random.random() * 2 * RECORD_AUDIO_VARIATION_PERCENT) - RECORD_AUDIO_VARIATION_PERCENT
+    return base * (1 + variation)
+
+
+def record_audio_delay_from_transcript(transcript: str) -> float:
+    """Fallback: tempo 'gravando' baseado na transcrição (19 chars/s, ±5%, +4s)."""
+    char_count = len(transcript) if transcript else 0
+    if char_count == 0:
+        return RECORD_AUDIO_EXTRA_SECONDS
+    base_seconds = char_count / RECORD_AUDIO_CHARS_PER_SECOND
+    variation = (random.random() * 2 * RECORD_AUDIO_VARIATION_PERCENT) - RECORD_AUDIO_VARIATION_PERCENT
+    return base_seconds * (1 + variation) + RECORD_AUDIO_EXTRA_SECONDS
+
 
 def calculate_typing_delay(text: str) -> Tuple[float, int, int]:
     """
@@ -549,34 +588,7 @@ class TelegramAdapter(MessengerAdapter):
             # Marcar como lido antes do gravando áudio (o destinatário vê o "lido")
             await self._mark_as_read(entity)
 
-            # Simular "gravando áudio" antes de enviar mídia (parecer mais humano)
-            if simulate_typing:
-                # Tempo fixo de 1-2s para mídia (variação aleatória)
-                typing_delay = 1.0 + random.random()
-                logger.info(
-                    "[telegram] typing (record_audio) for %.2fs before sending media to %s",
-                    typing_delay,
-                    recipient_id,
-                )
-                # Usar API de baixo nível SetTypingRequest
-                try:
-                    # Usar SendMessageRecordAudioAction para áudio, SendMessageTypingAction para outros
-                    action = (
-                        types.SendMessageRecordAudioAction()
-                        if content.media_type == "audio"
-                        else types.SendMessageTypingAction()
-                    )
-                    await self.client(
-                        functions.messages.SetTypingRequest(
-                            peer=entity,
-                            action=action,
-                        )
-                    )
-                    await asyncio.sleep(typing_delay)
-                except Exception as typing_err:
-                    logger.warning("[telegram] typing failed (continuing): %s", typing_err)
-
-            # Chatwoot Active Storage devolve 302; é preciso seguir o redirect
+            # Descarregar o ficheiro primeiro (precisamos dele para obter duração do áudio)
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 r = await client.get(url)
                 r.raise_for_status()
@@ -585,6 +597,61 @@ class TelegramAdapter(MessengerAdapter):
                 os.close(fd)
                 with open(path, "wb") as f:
                     f.write(r.content)
+
+            # Simular "gravando áudio": 1) duração real 2) fallback transcrição 3) fixo
+            if simulate_typing:
+                if content.media_type == "audio":
+                    duration = get_audio_duration_seconds(path)
+                    if duration is not None:
+                        total_seconds = record_audio_delay_from_duration(duration)
+                        logger.info(
+                            "[telegram] typing (record_audio) for %.2fs — usado: duração real do ficheiro (%.1fs) — before sending to %s",
+                            total_seconds,
+                            duration,
+                            recipient_id,
+                        )
+                    elif content.transcript:
+                        total_seconds = record_audio_delay_from_transcript(content.transcript)
+                        logger.info(
+                            "[telegram] typing (record_audio) for %.2fs — usado: transcrição (%d chars) — before sending to %s",
+                            total_seconds,
+                            len(content.transcript),
+                            recipient_id,
+                        )
+                    else:
+                        total_seconds = 1.0 + random.random()
+                        logger.info(
+                            "[telegram] typing (record_audio) for %.2fs — usado: fallback fixo (duração e transcrição indisponíveis) — before sending to %s",
+                            total_seconds,
+                            recipient_id,
+                        )
+                else:
+                    total_seconds = 1.0 + random.random()
+                    logger.info(
+                        "[telegram] typing for %.2fs before sending media to %s",
+                        total_seconds,
+                        recipient_id,
+                    )
+                try:
+                    action = (
+                        types.SendMessageRecordAudioAction()
+                        if content.media_type == "audio"
+                        else types.SendMessageTypingAction()
+                    )
+                    elapsed = 0.0
+                    while elapsed < total_seconds:
+                        await self.client(
+                            functions.messages.SetTypingRequest(
+                                peer=entity,
+                                action=action,
+                            )
+                        )
+                        chunk = min(4.0, total_seconds - elapsed)
+                        await asyncio.sleep(chunk)
+                        elapsed += chunk
+                except Exception as typing_err:
+                    logger.warning("[telegram] typing failed (continuing): %s", typing_err)
+
             # Enviar como voice para áudio (nota de voz no Telegram)
             is_voice = content.media_type == "audio"
             await self.client.send_file(entity, path, voice_note=is_voice)

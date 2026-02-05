@@ -131,7 +131,7 @@ class MessageRouter:
         return url
 
     def _first_audio_attachment(
-        self, attachments: List[Dict[str, Any]]
+        self, attachments: List[Dict[str, Any]], transcript: str = ""
     ) -> MediaContent | None:
         """Extrai o primeiro anexo de áudio (data_url) para enviar ao Telegram."""
         for att in attachments:
@@ -151,6 +151,7 @@ class MessageRouter:
                     caption=None,
                     filename=att.get("filename"),
                     mime_type=att.get("content_type"),
+                    transcript=(transcript or None),
                 )
         return None
 
@@ -215,7 +216,7 @@ class MessageRouter:
 
         # Primeiro anexo de áudio: enviar como media (voice no Telegram), com ou sem texto
         if attachments and channel == "telegram":
-            first_audio = self._first_audio_attachment(attachments)
+            first_audio = self._first_audio_attachment(attachments, transcript=text)
             if first_audio:
                 await self.dispatch_outbound_media(
                     channel=channel,

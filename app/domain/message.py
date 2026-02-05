@@ -16,6 +16,8 @@ class MediaContent(BaseModel):
     caption: str | None = None
     filename: str | None = None
     mime_type: str | None = None
+    # Transcrição do áudio: usado como fallback para calcular tempo "gravando" se duração real falhar
+    transcript: str | None = None
 
 
 class StickerContent(BaseModel):
