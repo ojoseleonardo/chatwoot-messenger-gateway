@@ -13,6 +13,25 @@ from app.infra.chatwoot_client import ChatwootClient
 
 logger = logging.getLogger(__name__)
 
+# Mensagens outgoing criadas por nós (sync Telegram ou /dispatch) para não reenviar
+# ao Telegram quando o Chatwoot dispara o webhook. (conv_id, content, timestamp).
+recent_created_outgoing: List[Tuple[int, str, float]] = []
+CREATED_OUTGOING_TTL_SEC = 15.0
+
+
+def register_dispatch_created_outgoing(conversation_id: int, content: str) -> None:
+    """
+    Regista uma mensagem outgoing criada pelo endpoint /dispatch para que o handler
+    chatwoot.outgoing não reenvie ao Telegram quando o webhook for recebido.
+    """
+    content = (content or "").strip()
+    now = time.monotonic()
+    while recent_created_outgoing and now - recent_created_outgoing[0][2] > CREATED_OUTGOING_TTL_SEC:
+        recent_created_outgoing.pop(0)
+    if len(recent_created_outgoing) >= 200:
+        recent_created_outgoing.pop(0)
+    recent_created_outgoing.append((conversation_id, content, now))
+
 
 async def _fetch_vk_profile(
     access_token: str, api_version: str, user_id: str
@@ -63,11 +82,6 @@ def wire_events(
     # no Chatwoot quando o handler telegram.outgoing recebe a mesma mensagem
     recent_gateway_sends: List[Tuple[str, str, float]] = []
     GATEWAY_SEND_TTL_SEC = 10.0
-
-    # Mensagens outgoing que nós criámos no Chatwoot (sync do Telegram) para não
-    # reenviar ao Telegram quando o Chatwoot dispara o webhook
-    recent_created_outgoing: List[Tuple[int, str, float]] = []
-    CREATED_OUTGOING_TTL_SEC = 15.0
 
     @bus.on("telegram.sent_by_gateway")
     def _record_gateway_send(payload: Dict[str, Any]) -> None:

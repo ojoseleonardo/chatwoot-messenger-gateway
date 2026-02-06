@@ -7,6 +7,7 @@ from pyee.asyncio import AsyncIOEventEmitter
 from starlette.responses import PlainTextResponse
 
 from app.application.chatwoot_service import ChatwootService
+from app.application.events import register_dispatch_created_outgoing
 from app.application.router import MessageRouter
 from app.config import AppConfig
 from app.domain.webhooks.wasender import WasenderWebhookPayload
@@ -369,6 +370,8 @@ def create_router(
                     content=text,
                     direction="outgoing",
                 )
+                # Para o webhook chatwoot.outgoing não reenviar ao Telegram (evitar duplicado)
+                register_dispatch_created_outgoing(conv_id, text)
                 await message_router.dispatch_direct(
                     channel="telegram",
                     recipient_id=recipient_id,
