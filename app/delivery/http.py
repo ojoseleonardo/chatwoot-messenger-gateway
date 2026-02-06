@@ -6,9 +6,11 @@ from pydantic import BaseModel, Field, field_validator
 from pyee.asyncio import AsyncIOEventEmitter
 from starlette.responses import PlainTextResponse
 
+from app.application.chatwoot_service import ChatwootService
 from app.application.router import MessageRouter
 from app.config import AppConfig
 from app.domain.webhooks.wasender import WasenderWebhookPayload
+from app.infra.chatwoot_client import ChatwootClient
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +258,12 @@ def create_router(
 
     # Endpoints de disparo manual e membros (requerem DISPATCH_API_TOKEN)
     if config.dispatch_api_token and message_router is not None:
+        _cw_client = ChatwootClient(
+            api_access_token=config.chatwoot.api_access_token,
+            account_id=config.chatwoot.account_id,
+            base_url=str(config.chatwoot.base_url),
+        )
+        _cw_service = ChatwootService(client=_cw_client)
 
         def _check_dispatch_token(authorization: str | None = Header(default=None)):
             if not authorization or not authorization.startswith("Bearer "):
@@ -326,9 +334,16 @@ def create_router(
             """
             Envia uma mensagem de texto para qualquer destinatário no Telegram.
             Mostra indicador de digitação (typing) pelo tempo informado em typing_seconds antes de enviar.
+            Cria/atualiza contacto e conversa no Chatwoot e devolve conversation_id, inbox_id e contact_id.
             Autenticação: header Authorization: Bearer <DISPATCH_API_TOKEN>.
             """
             _check_dispatch_token(authorization)
+            if not getattr(config, "telegram", None):
+                raise HTTPException(status_code=503, detail="Telegram não configurado")
+            inbox_id = config.telegram.inbox_id
+            recipient_id = body.recipient_id.strip()
+            to_id = recipient_id[3:].strip() if recipient_id.startswith("id:") else recipient_id
+            text = body.text.strip()
             logger.info(
                 "[dispatch] recipient_id=%r access_hash=%r (type=%s)",
                 body.recipient_id,
@@ -336,12 +351,31 @@ def create_router(
                 type(body.access_hash).__name__,
             )
             try:
+                contact = await _cw_service.ensure_contact(
+                    inbox_id=inbox_id,
+                    search_key=to_id or recipient_id,
+                    name=recipient_id,
+                    phone=None,
+                    email=None,
+                    custom_attributes={"telegram_user_id": to_id or recipient_id},
+                )
+                conv_id = await _cw_service.ensure_conversation(
+                    inbox_id=inbox_id,
+                    contact_id=contact["id"],
+                    source_id=contact["source_id"],
+                )
+                await _cw_service.create_message(
+                    conversation_id=conv_id,
+                    content=text,
+                    direction="outgoing",
+                )
                 await message_router.dispatch_direct(
                     channel="telegram",
-                    recipient_id=body.recipient_id.strip(),
-                    text=body.text.strip(),
+                    recipient_id=recipient_id,
+                    text=text,
                     typing_seconds=body.typing_seconds,
                     access_hash=body.access_hash,
+                    emit_outgoing_event=False,
                 )
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
@@ -357,6 +391,14 @@ def create_router(
                     status_code=503,
                     detail=msg,
                 ) from e
-            return {"status": "ok", "recipient_id": body.recipient_id}
+            return {
+                "status": "ok",
+                "recipient_id": body.recipient_id,
+                "chatwoot": {
+                    "conversation_id": conv_id,
+                    "inbox_id": inbox_id,
+                    "contact_id": contact["id"],
+                },
+            }
 
     return router

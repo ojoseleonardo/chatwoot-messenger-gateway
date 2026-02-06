@@ -236,11 +236,13 @@ class MessageRouter:
         text: str,
         typing_seconds: float = 2.0,
         access_hash: Optional[int] = None,
+        emit_outgoing_event: bool = True,
     ) -> None:
         """
         Envia texto para um destinatário no Telegram.
         Mostra indicador de digitação (typing) pelo tempo informado antes de enviar.
         access_hash: opcional; permite enviar por user_id sem o user ter iniciado conversa.
+        emit_outgoing_event: se True, emite telegram.outgoing para o handler criar a msg no Chatwoot.
         """
         if channel != "telegram":
             raise ValueError("O endpoint /dispatch é apenas para Telegram")
@@ -279,7 +281,8 @@ class MessageRouter:
         )
         # Garantir que a mensagem aparece no Chatwoot: emitir para o handler criar
         # (o evento Telethon pode chegar depois; o handler ignora duplicados por conv_id+text)
-        if self._bus:
+        # Se emit_outgoing_event=False, a mensagem já foi criada no Chatwoot pelo chamador (ex.: /dispatch).
+        if emit_outgoing_event and self._bus:
             to_id = (recipient_id or "").strip()
             if to_id.startswith("id:"):
                 to_id = to_id[3:].strip()
